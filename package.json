@@ -1,0 +1,15 @@
+{
+  "name": "lectern",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A reading application for a personal library, built around reading aloud",
+  "author": "Liam Grant",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "convert": "node scripts/html-to-markdown.mjs"
+  },
+  "devDependencies": {
+    "node-html-parser": "^7.0.1"
+  }
+}
