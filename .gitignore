@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+secrets.json
+
+.claude/
+CLAUDE.local.md
