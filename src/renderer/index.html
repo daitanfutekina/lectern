@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      No remote origins. SPEC invariant 2: everything works offline, and the
+      seven existing books pulling MathJax from a CDN is the defect this
+      replaces. MathJax is vendored under public/.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
+    />
+    <title>Lectern</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header id="sidebar-head">
+          <h1>Lectern</h1>
+          <button id="rescan" type="button" title="Re-scan the library">Rescan</button>
+        </header>
+        <nav id="books"></nav>
+        <footer id="library-meta"></footer>
+      </aside>
+
+      <main id="reader">
+        <div id="content">
+          <div class="placeholder">
+            <p>Choose a chapter.</p>
+          </div>
+        </div>
+        <nav id="chapter-nav"></nav>
+      </main>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
