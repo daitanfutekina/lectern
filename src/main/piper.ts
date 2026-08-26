@@ -57,6 +57,15 @@ export function configurePiper(libraryRoot: string): void {
 const voicesDir = (): string => join(root, '.library', 'voices')
 
 /**
+ * Where the voice-conversion models live.
+ *
+ * Kept apart from `voices` because they are a different kind of thing: a Piper
+ * voice speaks, and these change who is speaking. They are also enormous, and a
+ * reader who never asks for a character voice never needs them on disk at all.
+ */
+export const characterDir = (): string => join(root, '.library', 'rvc')
+
+/**
  * Voices present on disk.
  *
  * A folder is a voice when it holds a model and its tokens. Anything else is
@@ -122,7 +131,10 @@ function ensureWorker(voice: PiperVoice, shape: VoiceShape): Worker | null {
   void shutdownPiper()
 
   try {
-    const script = join(__dirname, '..', '..', 'scripts', 'piper-worker.cjs')
+    // Built alongside the main process rather than kept as a hand-written
+    // script, so it can share the signal processing in `@shared` instead of
+    // carrying a second copy of it.
+    const script = join(__dirname, 'voice-worker.js')
     const child = spawn(
       'node',
       [
@@ -130,7 +142,8 @@ function ensureWorker(voice: PiperVoice, shape: VoiceShape): Worker | null {
         voice.path,
         String(shape.lengthScale),
         String(shape.noiseScale),
-        String(shape.noiseW)
+        String(shape.noiseW),
+        characterDir()
       ],
       { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
     )
@@ -207,6 +220,12 @@ function settle(
   })
 }
 
+/** A character voice to convert into, and how far to move the base voice first. */
+export interface CharacterRequest {
+  readonly name: string
+  readonly semitones: number
+}
+
 export interface Spoken {
   /** 16-bit PCM, which is what an AudioContext can be handed directly. */
   readonly pcm: Int16Array
@@ -218,7 +237,8 @@ export async function speak(
   voiceId: string,
   text: string,
   shape: VoiceShape,
-  speed: number
+  speed: number,
+  character?: CharacterRequest
 ): Promise<Spoken | null> {
   const voice = (await listVoices()).find((entry) => entry.id === voiceId)
   if (!voice) return null
@@ -233,7 +253,14 @@ export async function speak(
   return new Promise<Spoken | null>((resolve) => {
     active.pending.set(id, resolve)
     try {
-      active.process.stdin.write(`${JSON.stringify({ id, text, speed })}\n`)
+      const request = {
+        id,
+        text,
+        speed,
+        character: character?.name,
+        semitones: character?.semitones ?? 0
+      }
+      active.process.stdin.write(`${JSON.stringify(request)}\n`)
     } catch {
       active.pending.delete(id)
       resolve(null)
