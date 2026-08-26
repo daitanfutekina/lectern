@@ -68,6 +68,19 @@ function kindOf(element: HTMLElement): Block['kind'] {
 }
 
 /**
+ * Is this node an element?
+ *
+ * `instanceof HTMLElement` cannot be used here. An EPUB renders inside a frame,
+ * and every element in it is an instance of *that* frame's `HTMLElement` rather
+ * than this window's -- so the check silently returns false for every node in
+ * the document and the walk finds nothing at all. `nodeType` is the same number
+ * in every realm.
+ */
+function isElement(node: Node): node is HTMLElement {
+  return node.nodeType === 1
+}
+
+/**
  * Walk a rendered chapter and produce everything to say, in reading order.
  *
  * Collapsed content is included. A reader listening to a chapter wants the
@@ -93,18 +106,32 @@ export function extract(body: HTMLElement): Utterance[] {
       return
     }
 
+    /*
+      A PDF page's text layer is one block.
+
+      pdf.js positions every fragment as its own absolutely-placed span, so
+      there are no paragraphs to find -- descending would produce hundreds of
+      one-word utterances in drawing order. Taken whole, the page splits into
+      sentences like any other prose, and because the spans are real elements in
+      the right places, word-follow still lands on the page.
+    */
+    if (element.classList.contains('pdf-text-layer')) {
+      addBlock(out, element, 'paragraph')
+      return
+    }
+
     if (LEAF_TAGS.has(element.tagName)) {
       addBlock(out, element, kindOf(element))
       return
     }
 
     for (const child of Array.from(element.children)) {
-      if (child instanceof HTMLElement) walk(child)
+      if (isElement(child)) walk(child)
     }
   }
 
   for (const child of Array.from(body.children)) {
-    if (child instanceof HTMLElement) walk(child)
+    if (isElement(child)) walk(child)
   }
 
   return out

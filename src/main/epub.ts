@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { unzipSync, strFromU8 } from 'fflate'
-import { bodyOf, opfPath, parseOpf, titleFromDocument, type EpubStructure } from '@shared/epub'
+import { bodyOf, opfPath, parseOpf, resolveHref, titleFromDocument, type EpubStructure } from '@shared/epub'
 import type { Chapter } from '@shared/library'
 
 /**
@@ -78,13 +78,112 @@ function headingsOf(xhtml: string): string[] {
     .filter(Boolean)
 }
 
-/** One chapter's HTML, ready for the renderer. */
-export async function epubChapter(path: string, href: string): Promise<string | null> {
+/**
+ * The book's cover, as a data URL.
+ *
+ * EPUB gives three ways to declare one and real files use all three, so all
+ * three are tried: the `cover-image` property, a `<meta name="cover">` pointing
+ * at a manifest id, and failing both, the first image whose href looks like a
+ * cover.
+ */
+export async function epubCover(path: string): Promise<string | null> {
+  const book = await openEpub(path)
+  const items = Object.values(book.structure.manifest)
+
+  const byProperty = items.find((item) => item.properties?.includes('cover-image'))
+  const byMeta = book.structure.coverId ? book.structure.manifest[book.structure.coverId] : undefined
+  const byName = items.find(
+    (item) => item.mediaType.startsWith('image/') && /cover/i.test(item.href)
+  )
+  const item = byProperty ?? byMeta ?? byName
+  if (!item) return null
+
+  const raw = book.entries[item.href]
+  if (!raw || raw.byteLength > 4_000_000) return null
+
+  const type = item.mediaType || 'image/jpeg'
+  return `data:${type};base64,${Buffer.from(raw).toString('base64')}`
+}
+
+/**
+ * One chapter as a complete, self-contained HTML document.
+ *
+ * SPEC section 3, as amended: an EPUB keeps its own typography. That is part of
+ * the book and not ours to replace -- the "one stylesheet" rule exists to stop
+ * *our* seven textbooks diverging, and applying it here was a mistake that
+ * repainted every downloaded book in our own colours.
+ *
+ * Everything the document references has to be inlined, because it will be
+ * rendered in an isolated frame that cannot reach inside the archive: the
+ * stylesheets it links, and the images it shows.
+ */
+export async function epubDocument(path: string, href: string): Promise<string | null> {
   const book = await openEpub(path)
   // The href must be one the spine already listed, or a crafted name could
   // reach any entry in the archive.
   if (!book.chapters.some((chapter) => chapter.file === href)) return null
 
   const raw = book.entries[href]
-  return raw ? bodyOf(strFromU8(raw)) : null
+  if (!raw) return null
+
+  let html = strFromU8(raw)
+    /*
+      The XML prolog has to go. These files are XHTML and carry
+      `<?xml version="1.0"?>` at the top; an HTML parser reads that as a bogus
+      comment, which pushes the DOCTYPE out of first position and leaves the
+      document in quirks mode. Rendered in a frame the result was an empty body
+      and a chapter that produced no speech at all.
+    */
+    .replace(/^\s*<\?xml[^>]*\?>\s*/i, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, '')
+
+  html = inlineStylesheets(html, book, href)
+  html = inlineImages(html, book, href)
+  return html
+}
+
+/** Replace `<link rel=stylesheet>` with the archive's own CSS. */
+function inlineStylesheets(html: string, book: EpubBook, from: string): string {
+  return html.replace(/<link\b[^>]*>/gi, (tag) => {
+    if (!/stylesheet/i.test(tag)) return ''
+    const href = /href\s*=\s*("([^"]*)"|'([^']*)')/i.exec(tag)
+    const target = href?.[2] ?? href?.[3]
+    if (!target) return ''
+
+    const entry = book.entries[resolveHref(from, target)]
+    if (!entry) return ''
+    return `<style>${strFromU8(entry)}</style>`
+  })
+}
+
+/**
+ * Replace image sources with data URLs.
+ *
+ * A relative `src` inside an isolated frame resolves to nothing, so every
+ * illustration in every EPUB would be a broken-image icon.
+ */
+function inlineImages(html: string, book: EpubBook, from: string): string {
+  return html.replace(/(<(?:img|image)\b[^>]*?(?:src|xlink:href)\s*=\s*)("([^"]*)"|'([^']*)')/gi,
+    (whole, prefix: string, _quoted: string, doubleQuoted?: string, singleQuoted?: string) => {
+      const target = doubleQuoted ?? singleQuoted
+      if (!target || /^(data:|https?:)/i.test(target)) return whole
+
+      const path = resolveHref(from, target)
+      const entry = book.entries[path]
+      if (!entry || entry.byteLength > 3_000_000) return whole
+
+      const type = guessImageType(path)
+      return `${prefix}"data:${type};base64,${Buffer.from(entry).toString('base64')}"`
+    }
+  )
+}
+
+function guessImageType(path: string): string {
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  if (extension === 'png') return 'image/png'
+  if (extension === 'gif') return 'image/gif'
+  if (extension === 'svg') return 'image/svg+xml'
+  if (extension === 'webp') return 'image/webp'
+  return 'image/jpeg'
 }

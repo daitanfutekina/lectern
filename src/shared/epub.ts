@@ -17,6 +17,8 @@ export interface EpubItem {
   /** Path within the archive, already resolved against the OPF's own folder. */
   readonly href: string
   readonly mediaType: string
+  /** EPUB 3 `properties`, which is where `cover-image` is declared. */
+  readonly properties: string | null
 }
 
 export interface EpubStructure {
@@ -27,6 +29,8 @@ export interface EpubStructure {
   readonly spine: readonly EpubItem[]
   /** Everything the manifest lists, by id. */
   readonly manifest: Readonly<Record<string, EpubItem>>
+  /** EPUB 2 declares its cover as a meta tag naming a manifest id. */
+  readonly coverId: string | null
 }
 
 export const EMPTY_EPUB: EpubStructure = {
@@ -34,7 +38,8 @@ export const EMPTY_EPUB: EpubStructure = {
   author: null,
   language: null,
   spine: [],
-  manifest: {}
+  manifest: {},
+  coverId: null
 }
 
 const decode = (text: string): string =>
@@ -99,7 +104,8 @@ export function parseOpf(opfXml: string, opfLocation: string): EpubStructure {
     manifest[id] = {
       id,
       href: resolveHref(opfLocation, href),
-      mediaType: attribute(tag, 'media-type') ?? ''
+      mediaType: attribute(tag, 'media-type') ?? '',
+      properties: attribute(tag, 'properties')
     }
   }
 
@@ -119,12 +125,16 @@ export function parseOpf(opfXml: string, opfLocation: string): EpubStructure {
     return value ? decode(value) : null
   }
 
+  // EPUB 2: <meta name="cover" content="cover-image-id"/>
+  const coverMeta = /<meta[^>]*name\s*=\s*["']cover["'][^>]*>/i.exec(opfXml)?.[0]
+
   return {
     title: meta('title'),
     author: meta('creator'),
     language: meta('language'),
     spine,
-    manifest
+    manifest,
+    coverId: coverMeta ? attribute(coverMeta, 'content') : null
   }
 }
 

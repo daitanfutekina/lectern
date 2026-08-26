@@ -19,6 +19,9 @@ import { blockCount, currentPosition, restorePosition, trackPosition } from './p
 import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utterance } from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
+import { hasCover, renderHome, setCover } from './home'
+import { pdfCover, renderPages } from './pdf-view'
+import { renderEpub } from './epub-view'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
 import { mathUtterance } from '@shared/math-gate'
 
@@ -42,6 +45,12 @@ let restoring = false
 /** Flags in the library, and the paragraph currently being flagged. */
 let flags: readonly Flag[] = []
 let flagging: HTMLElement | null = null
+
+/**
+ * Zoom multiplier for the PDF view, on top of fitting the page to the pane.
+ * 1 means "as wide as the window allows".
+ */
+let pdfZoom = 1
 
 /** One reader for the whole session; chapters are loaded into it. */
 const reader = new Reader()
@@ -74,14 +83,25 @@ function renderSidebar(): void {
 
   books.replaceChildren()
 
-  if (index.books.length === 0) {
-    books.append(element('div', 'book-title', 'No books found'))
+  if (!current) {
     const hint = element('p', 'sidebar-hint')
-    hint.textContent = `Put a book folder in ${index.root || 'the library root'}\\books`
+    hint.textContent =
+      index.books.length === 0
+        ? `Put a book folder in the books folder of ${index.root || 'the library root'}`
+        : 'Choose a book from the shelf.'
     books.append(hint)
   }
 
-  for (const book of index.books) {
+  /*
+    Only the open book's chapters.
+
+    Listing every chapter of every book made the sidebar a second, worse copy of
+    the library -- and the shelf is the library now. What belongs beside an open
+    book is where the reader is in *it*.
+  */
+  const shown = current ? index.books.filter((book) => book.id === current?.bookId) : []
+
+  for (const book of shown) {
     books.append(element('div', 'book-title', book.title))
     const stored = bookProgress(book.id)
 
@@ -254,6 +274,7 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   if (!book || !chapter) return
 
   restoring = true
+  document.body.classList.remove('is-home')
   current = { bookId, file }
   renderSidebar()
   renderNav(book, chapter)
@@ -265,8 +286,19 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
     return
   }
 
-  // Markdown books carry front matter and go through the pipeline. EPUB and
-  // PDF chapters arrive as HTML already, prepared by their adapter in main.
+  // A PDF is shown as a PDF and an EPUB keeps its own typography. Only our own
+  // books go through the Markdown pipeline and wear the application's design.
+  if (book.format === 'pdf') {
+    await openPdfChapter(container, book, chapter)
+    restoring = false
+    return
+  }
+  if (book.format === 'epub') {
+    await openEpubChapter(container, book, chapter, source)
+    restoring = false
+    return
+  }
+
   const isMarkdown = book.format === 'markdown'
   const { matter, body } = isMarkdown
     ? splitFrontMatter(source)
@@ -372,6 +404,67 @@ async function fillMathSpeech(
   const resumeAt = reader.state.index
   const rebuilt = withMathSpeech(extract(body), displaySpeech)
   reader.load(rebuilt, Math.min(resumeAt, Math.max(0, rebuilt.length - 1)))
+}
+
+/**
+ * A PDF chapter: the real pages, with a text layer over them.
+ *
+ * Speech comes from the text the adapter extracted, and the pages come from
+ * pdf.js. Display and reading are separate concerns here in a way they are not
+ * for our own books, where the two are the same document.
+ */
+async function openPdfChapter(
+  container: HTMLElement,
+  book: Book,
+  chapter: Chapter
+): Promise<void> {
+  const range = /^p(\d+)-(\d+)$/.exec(chapter.file)
+  if (!range) return
+
+  const from = Number(range[1])
+  const to = Number(range[2])
+
+  const pages = element('div', 'pdf-pages')
+  container.replaceChildren(pages)
+  container.scrollTop = 0
+
+  await renderPages(pages, book.id, {
+    from,
+    to,
+    zoom: pdfZoom,
+    availableWidth: container.clientWidth
+  })
+
+  // The text layer carries the words, so the ordinary walk finds them and
+  // word-follow lands on the page rather than on a copy of it.
+  const utterances = extract(pages)
+  reader.load(utterances, 0)
+  renderFlags()
+}
+
+/** An EPUB chapter, rendered in its own frame with its own styling. */
+async function openEpubChapter(
+  container: HTMLElement,
+  book: Book,
+  chapter: Chapter,
+  html: string
+): Promise<void> {
+  void book
+  void chapter
+  const host = element('div', 'epub-host')
+  container.replaceChildren(host)
+  container.scrollTop = 0
+
+  const rendered = await renderEpub(host, html)
+  if (!rendered) {
+    console.warn('epub: frame did not render')
+    return
+  }
+
+  // The frame is same-origin, so the speech walk reaches straight into it and
+  // every downstream feature works unchanged.
+  reader.load(extract(rendered.body), 0)
+  renderFlags()
 }
 
 /* ── Flagging a passage ──────────────────────────────────────────────── */
@@ -631,6 +724,137 @@ async function setUpPlayer(): Promise<void> {
   onVoicesChanged(() => fill(speechSynthesis.getVoices()))
 }
 
+/* ── Home ────────────────────────────────────────────────────────────── */
+
+function showHome(): void {
+  const container = el<HTMLElement>('content')
+  if (!container) return
+
+  cancelScan()
+  reader.stop()
+  current = null
+
+  document.body.classList.add('is-home')
+  renderHome(container, index, progressOf, (bookId) => {
+    const book = findBook(index, bookId)
+    const stored = bookProgress(bookId)
+    // Opening a book means continuing it, not restarting it.
+    const last = stored.lastChapter
+    const chapter = book?.chapters.find((c) => c.file === last) ?? book?.chapters[0]
+    if (book && chapter) void open(book.id, chapter.file)
+  })
+
+  renderSidebar()
+  renderNav(null, null)
+  void loadCovers()
+}
+
+/** How far through a book the reader is, across all its chapters. */
+function progressOf(book: Book): number | null {
+  const stored = bookProgress(book.id)
+  const entries = book.chapters
+    .map((chapter) => stored.chapters[chapter.file])
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+  if (entries.length === 0) return null
+
+  const total = entries.reduce((sum, entry) => sum + fractionRead(entry), 0)
+  return total / book.chapters.length
+}
+
+/**
+ * Fetch covers in the background.
+ *
+ * One at a time rather than all at once: rendering the first page of a
+ * 90 MB PDF is not free, and ten of them in parallel would make the shelf
+ * unresponsive for as long as it took.
+ */
+async function loadCovers(): Promise<void> {
+  for (const book of index.books) {
+    if (hasCover(book.id)) continue
+
+    if (book.format === 'epub') {
+      const cover = await window.lectern.library.cover(book.id)
+      if (cover) setCover(book.id, cover)
+    } else if (book.format === 'pdf') {
+      const cover = await pdfCover(book.id)
+      if (cover) setCover(book.id, cover)
+    }
+  }
+}
+
+/* ── Adding documents ────────────────────────────────────────────────── */
+
+/**
+ * Drop a PDF or EPUB anywhere on the window to add it.
+ *
+ * Nothing outside `books/` is found automatically, so this is the main way a
+ * downloaded book gets into the library. The file stays where it is; only a
+ * reference is stored.
+ */
+function setUpDropTarget(): void {
+  const overlay = el<HTMLElement>('drop-overlay')
+  let depth = 0
+
+  const show = (on: boolean): void => {
+    overlay?.classList.toggle('is-visible', on)
+  }
+
+  // Counted rather than toggled: dragging over a child fires `dragleave` on the
+  // parent, so a plain toggle flickers the overlay off mid-drag.
+  document.addEventListener('dragenter', (event) => {
+    event.preventDefault()
+    depth += 1
+    show(true)
+  })
+
+  document.addEventListener('dragover', (event) => {
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  })
+
+  document.addEventListener('dragleave', () => {
+    depth = Math.max(0, depth - 1)
+    if (depth === 0) show(false)
+  })
+
+  document.addEventListener('drop', (event) => {
+    event.preventDefault()
+    depth = 0
+    show(false)
+
+    const files = Array.from(event.dataTransfer?.files ?? [])
+    if (files.length === 0) return
+
+    const paths = files.map((file) => window.lectern.library.pathForFile(file)).filter(Boolean)
+    if (paths.length === 0) return
+
+    void window.lectern.library.add(paths).then(async (result) => {
+      if (result.added > 0) {
+        await load(true)
+        showHome()
+      }
+      if (result.rejected.length > 0) {
+        // Said plainly rather than ignored: a file that vanishes on being
+        // dropped looks like the application is broken.
+        announce(`${result.rejected.length} file(s) skipped — only PDF and EPUB can be added.`)
+      } else if (result.added === 0) {
+        announce('Already in the library.')
+      }
+    })
+  })
+}
+
+/** A brief message in the shelf header. */
+function announce(message: string): void {
+  const hint = document.querySelector<HTMLElement>('.shelf-hint')
+  if (!hint) return
+  const original = hint.textContent
+  hint.textContent = message
+  setTimeout(() => {
+    hint.textContent = original
+  }, 4000)
+}
+
 /* ── Startup ─────────────────────────────────────────────────────────── */
 
 async function load(rescan = false): Promise<void> {
@@ -655,7 +879,8 @@ function resumeTarget(): { bookId: string; file: string } | null {
 async function start(): Promise<void> {
   const container = el<HTMLElement>('content')
 
-  el<HTMLButtonElement>('rescan')?.addEventListener('click', () => void load(true))
+  el<HTMLButtonElement>('home')?.addEventListener('click', showHome)
+  el<HTMLButtonElement>('rescan')?.addEventListener('click', () => void load(true).then(showHome))
 
   // Writes INDEX.md: every book, chapter and heading in one file, so "have I
   // covered eigenvalues" can be answered by reading one thing rather than
@@ -705,11 +930,24 @@ async function start(): Promise<void> {
 
   // Clicking a paragraph starts reading from it, which is the fastest way to
   // say "read from here" and needs no extra control.
-  el<HTMLElement>('content')?.addEventListener('dblclick', (event) => {
+  /*
+    Click a paragraph to read from it.
+    
+    This was a double-click, which nothing on screen suggested and nobody found.
+    A single click on text does nothing else in a reader, so it is free to mean
+    the one thing a reader wants from a paragraph they are looking at.
+  */
+  el<HTMLElement>('content')?.addEventListener('click', (event) => {
     const target = event.target
     if (!(target instanceof HTMLElement)) return
-    const block = target.closest('p, h1, h2, h3, h4, li, summary')
+    // Controls and links keep their own behaviour.
+    if (target.closest('button, a, summary, input, select')) return
+    if ((window.getSelection()?.toString() ?? '').length > 0) return
+
+    const block = target.closest('p, h1, h2, h3, h4, h5, h6, li')
     if (!(block instanceof HTMLElement)) return
+    if (block.dataset['speak'] === 'no') return
+
     reader.jumpTo(reader.indexNear(block))
     reader.play()
   })
@@ -746,6 +984,7 @@ async function start(): Promise<void> {
   renderSidebar()
 
   setUpFlagging()
+  setUpDropTarget()
   await setUpPlayer()
 
   flags = (await window.lectern.flags.get()).flags
@@ -766,8 +1005,10 @@ async function start(): Promise<void> {
     })
   })
 
-  const target = resumeTarget()
-  if (target) void open(target.bookId, target.file)
+  // The shelf, not the last chapter. Landing straight inside a book gives the
+  // reader no way to see what else is there, and "continue" is one click away
+  // on the card itself.
+  showHome()
 }
 
 // A rejected promise inside a `void`ed call vanishes without trace, which cost

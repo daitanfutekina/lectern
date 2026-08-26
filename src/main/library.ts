@@ -2,8 +2,9 @@ import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseManifest, splitFrontMatter } from '@shared/manifest'
 import { extractHeadings, countWords } from '@shared/outline'
-import { epubChapter, openEpub } from './epub'
+import { epubDocument, openEpub } from './epub'
 import { openPdf, pdfChapter } from './pdf'
+import { livingDocuments } from './documents'
 import type { Book, Chapter, DocumentFormat, LibraryIndex } from '@shared/library'
 
 /**
@@ -162,6 +163,28 @@ async function scanFileBooks(
   return books.filter((book): book is Book => book !== null)
 }
 
+/**
+ * Documents the reader added, read where they live.
+ *
+ * These are referenced rather than copied, so the id has to survive the file
+ * being somewhere outside the library entirely.
+ */
+async function scanAddedDocuments(): Promise<Book[]> {
+  const entries = await livingDocuments()
+  const books = await Promise.all(
+    entries.map(async (entry) => {
+      const name = entry.path.split(/[\/]/).pop() ?? entry.path
+      const format: DocumentFormat = name.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf'
+      try {
+        return await readFileBook(entry.path.slice(0, entry.path.length - name.length), name, format)
+      } catch {
+        return null
+      }
+    })
+  )
+  return books.filter((book): book is Book => book !== null)
+}
+
 /** Scan the root. One unreadable book must not cost the whole library. */
 export async function scanLibrary(root: string): Promise<LibraryIndex> {
   const booksPath = join(root, BOOKS_DIR)
@@ -179,9 +202,10 @@ export async function scanLibrary(root: string): Promise<LibraryIndex> {
       )
     : []
 
-  const [epubs, pdfs] = await Promise.all([
+  const [epubs, pdfs, added] = await Promise.all([
     scanFileBooks(root, EPUBS_DIR, '.epub', 'epub'),
-    scanFileBooks(root, PDFS_DIR, '.pdf', 'pdf')
+    scanFileBooks(root, PDFS_DIR, '.pdf', 'pdf'),
+    scanAddedDocuments()
   ])
 
   return {
@@ -190,7 +214,8 @@ export async function scanLibrary(root: string): Promise<LibraryIndex> {
     books: [
       ...folderBooks.filter((book): book is Book => book !== null),
       ...epubs,
-      ...pdfs
+      ...pdfs,
+      ...added
     ]
   }
 }
@@ -222,7 +247,7 @@ export async function readChapterSource(book: Book, file: string): Promise<strin
   // anything on disk. Membership in the book's own chapter list is the check.
   if (!book.chapters.some((chapter) => chapter.file === file)) return null
 
-  if (book.format === 'epub') return epubChapter(book.path, file)
+  if (book.format === 'epub') return epubDocument(book.path, file)
   if (book.format === 'pdf') return pdfChapter(book.path, file)
   return readIfPresent(join(book.path, file))
 }

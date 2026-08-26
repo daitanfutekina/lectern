@@ -4,9 +4,11 @@ import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, readChapterSource, saveIndex, scanLibrary } from './library'
 import { configureMath, speakMath } from './math-speech'
 import { pdfBytes } from './pdf'
+import { epubCover } from './epub'
 import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
 import { watchLibrary } from './watch'
+import { addDocuments, configureDocuments } from './documents'
 import { flagId, type Flag, type FlagKind } from '@shared/flags'
 import {
   addBookmark,
@@ -59,9 +61,16 @@ async function library(rescan = false): Promise<LibraryIndex> {
   return cached
 }
 
-/** The root is a setting in a later milestone; for now it is the default. */
+/**
+ * The library root.
+ *
+ * Overridable so the application can be pointed at a scratch library for
+ * verification. Testing against the reader's own shelf means putting files on
+ * it, and a library that fills up with test fixtures is exactly what this
+ * application is supposed to stop happening.
+ */
 function root(): string {
-  return DEFAULT_ROOT
+  return process.env['LECTERN_ROOT'] || DEFAULT_ROOT
 }
 
 /**
@@ -127,6 +136,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId('com.lectern.app')
   configureOcrCache(root())
   configureFlags(root())
+  configureDocuments(root())
   serveRenderer()
 
   ipcMain.handle('library:get', () => library())
@@ -208,6 +218,27 @@ app.whenReady().then(() => {
       })
     }
   )
+
+  ipcMain.handle('library:add', async (_event, paths: unknown) => {
+    if (!Array.isArray(paths)) return { added: 0, rejected: [] }
+    const cleaned = paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
+    const result = await addDocuments(cleaned)
+    // The index is derived from what is on the shelf, so adding to the shelf
+    // invalidates it.
+    if (result.added > 0) cached = null
+    return result
+  })
+
+  ipcMain.handle('library:cover', async (_event, bookId: unknown) => {
+    if (typeof bookId !== 'string') return null
+    const book = findBook(await library(), bookId)
+    if (!book || book.format !== 'epub') return null
+    try {
+      return await epubCover(book.path)
+    } catch {
+      return null
+    }
+  })
 
   ipcMain.handle('library:chapter', async (_event, bookId: unknown, file: unknown) => {
     if (typeof bookId !== 'string' || typeof file !== 'string') return null

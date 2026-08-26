@@ -39,6 +39,17 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  /*
+    The window itself never scrolls; only the reader pane does. Without this a
+    second scrollbar appeared on the window and dragged a mile of empty
+    background past the content.
+  */
+  height: 100%;
+  overflow: hidden;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -830,4 +841,246 @@ details.box[open] > summary::before {
 
 .flag-remove:hover {
   color: var(--danger);
+}
+
+/* ── The shelf ─────────────────────────────────────────────────────── */
+
+/*
+  The home view fills the reader pane, and only the reader pane scrolls. The
+  page itself must never scroll: a second scrollbar on the window dragged a
+  mile of empty background past the content and served no purpose.
+*/
+body.is-home #chapter-nav,
+body.is-home #player,
+body.is-home #scan-progress,
+body.is-home #flag-bar {
+  display: none;
+}
+
+.shelf-header {
+  max-width: none;
+  margin-bottom: 28px;
+}
+
+.shelf-header h2 {
+  margin: 0 0 6px;
+  border: 0;
+  padding: 0;
+  font-size: 24px;
+}
+
+.shelf-hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.shelf {
+  display: grid;
+  max-width: none;
+  gap: 28px 24px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+
+.shelf-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shelf-art {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.shelf-card:hover .shelf-art {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 26px rgb(0 0 0 / 0.5);
+}
+
+.shelf-card:focus-visible .shelf-art {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shelf-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A generated cover: initials over the format's colour, legible at a glance. */
+.shelf-art.is-generated {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--cover) 30%, var(--bg-elev)),
+    var(--bg-elev) 70%
+  );
+}
+
+.shelf-initials {
+  color: var(--cover);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/*
+  A corner ribbon. It says what the file is without competing with the title
+  for the reader's attention, which a line of text under the cover would.
+*/
+.shelf-ribbon {
+  position: absolute;
+  top: 10px;
+  right: -30px;
+  width: 108px;
+  padding: 3px 0;
+  transform: rotate(45deg);
+  background: var(--text-faint);
+  color: #0d1117;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-align: center;
+}
+
+.ribbon-markdown { background: var(--accent); }
+.ribbon-html { background: var(--violet); }
+.ribbon-epub { background: var(--success); }
+.ribbon-pdf { background: var(--danger); }
+
+.shelf-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.shelf-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.shelf-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.shelf-meta {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+/* ── PDF pages ─────────────────────────────────────────────────────── */
+
+.pdf-pages {
+  display: flex;
+  max-width: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.pdf-page {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.5);
+}
+
+.pdf-page canvas {
+  display: block;
+}
+
+/*
+  pdf.js's text layer, over the canvas and invisible. It is what makes text
+  selectable on a rendered page, and what gives word-follow something real to
+  highlight on a page made of pixels.
+*/
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0.01;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+}
+
+.pdf-text-layer span,
+.pdf-text-layer br {
+  position: absolute;
+  color: transparent;
+  transform-origin: 0 0;
+  white-space: pre;
+  cursor: text;
+}
+
+.pdf-text-layer ::selection {
+  background: rgb(88 166 255 / 0.4);
+}
+
+/* ── EPUB frame ────────────────────────────────────────────────────── */
+
+.epub-host {
+  max-width: none;
+}
+
+/*
+  The frame is sized to its content and never scrolls itself. A frame with its
+  own scrollbar inside a scrolling page is the two-scrollbar problem, and it
+  also hides the content's real position from reading-position tracking.
+*/
+.epub-frame {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border: 0;
+  background: #14181f;
+}
+
+/* Shown while a file is being dragged over the window. */
+#drop-overlay {
+  position: fixed;
+  z-index: 20;
+  display: none;
+  place-items: center;
+  inset: 0;
+  background: rgb(13 17 23 / 0.82);
+}
+
+#drop-overlay.is-visible {
+  display: grid;
+}
+
+#drop-overlay span {
+  padding: 22px 34px;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  color: var(--accent-2);
+  font-size: 17px;
 }

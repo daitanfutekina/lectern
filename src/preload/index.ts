@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { LibraryIndex } from '@shared/library'
 import type { Bookmark, ChapterProgress, LibraryProgress, ReadingPosition } from '@shared/progress'
 import type { Flag, FlagStore } from '@shared/flags'
@@ -16,6 +16,29 @@ const api = {
     get: (): Promise<LibraryIndex> => ipcRenderer.invoke('library:get'),
     /** Force a re-scan of the root, for when books changed on disk. */
     rescan: (): Promise<LibraryIndex> => ipcRenderer.invoke('library:rescan'),
+    /**
+     * Add documents to the library, referenced where they live.
+     *
+     * Takes paths rather than files because only the main process should be
+     * touching the filesystem.
+     */
+    add: (paths: readonly string[]): Promise<{ added: number; rejected: string[] }> =>
+      ipcRenderer.invoke('library:add', paths),
+    /**
+     * The real path of a dropped file.
+     *
+     * `File.path` was removed from Electron; `webUtils` is the supported way to
+     * get it, and it has to happen here because the renderer has no `webUtils`.
+     */
+    pathForFile: (file: File): string => {
+      try {
+        return webUtils.getPathForFile(file)
+      } catch {
+        return ''
+      }
+    },
+    /** A book's cover as a data URL, where its format carries one. */
+    cover: (bookId: string): Promise<string | null> => ipcRenderer.invoke('library:cover', bookId),
     /** Raw Markdown for one chapter, or null if the book or file is unknown. */
     chapter: (bookId: string, file: string): Promise<string | null> =>
       ipcRenderer.invoke('library:chapter', bookId, file)

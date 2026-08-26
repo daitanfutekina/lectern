@@ -18,6 +18,17 @@ Everything is free and offline. No paid service, no account, no network.
 All seven are done, each against the explicit *done when* in
 [docs/SPEC.md](docs/SPEC.md) section 11.
 
+## The shelf
+
+The home view is a grid of covers with a corner ribbon per format. Only
+`books/` is scanned; a PDF or EPUB joins the library by being dropped on the
+window or placed in `pdfs/`/`epubs/` by hand, and it is referenced where it
+lives rather than copied.
+
+A PDF is shown as its rendered pages and an EPUB keeps its own typography. Only
+the hand-written textbooks wear the application's design, which is what stops
+*those* diverging.
+
 ## The handoff
 
 Right-click a paragraph while reading to flag it. That writes `FLAGGED.md` at
