@@ -1,4 +1,4 @@
-import { BOOK_VOICE, type PiperVoice, type VoiceShape } from '@shared/voice'
+import { BOOK_VOICE, pauseAfter, type PiperVoice, type VoiceShape } from '@shared/voice'
 
 /**
  * Playing neural speech. SPEC section 5.
@@ -122,10 +122,23 @@ export async function speak(
   }
 
   let stopped = false
+  let gap: ReturnType<typeof setTimeout> | null = null
+
   const done = new Promise<void>((resolve) => {
     source.addEventListener('ended', () => {
       for (const timer of timers) clearTimeout(timer)
-      resolve()
+      if (stopped) {
+        resolve()
+        return
+      }
+      /*
+        A beat before the next sentence.
+
+        A browser speech engine leaves a natural gap between utterances; a queue
+        of audio buffers played back to back leaves none, so every sentence
+        starts the instant the last one ends and the passage runs together.
+      */
+      gap = setTimeout(resolve, pauseAfter(utterance.text))
     })
   })
 
@@ -137,6 +150,7 @@ export async function speak(
       if (stopped) return
       stopped = true
       for (const timer of timers) clearTimeout(timer)
+      if (gap) clearTimeout(gap)
       try {
         source.stop()
       } catch {

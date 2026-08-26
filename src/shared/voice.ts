@@ -36,14 +36,39 @@ export interface VoiceShape {
 /**
  * Reading a textbook is not reading a novel.
  *
- * Slightly slower and slightly flatter than a model's default: a long technical
- * passage wants steadiness, and expressiveness that charms for a paragraph is
- * tiring across an hour.
+ * The number here was measured, not guessed. At Piper's own default the voice
+ * reads at **182 words per minute**; the first attempt at a "book voice" used
+ * 1.1 and managed 179, which is to say it changed nothing. Audiobook narration
+ * sits around 150, and past roughly 180 it stops being restful -- which is
+ * exactly what "they sound like they are about to run out of breath" describes.
+ *
+ * 1.35 measures at about 155 wpm on the same passage.
  */
 export const BOOK_VOICE: VoiceShape = {
-  lengthScale: 1.1,
-  noiseScale: 0.6,
-  noiseW: 0.7
+  lengthScale: 1.35,
+  noiseScale: 0.667,
+  noiseW: 0.8
+}
+
+/**
+ * Silence after an utterance, in milliseconds.
+ *
+ * A browser speech engine puts a natural gap between utterances. A queue of
+ * audio buffers played back to back has none at all, so every sentence begins
+ * the instant the last one ends and the whole passage runs together -- the
+ * other half of "no breath".
+ *
+ * The pause is chosen from how the sentence ended, because that is what the
+ * punctuation is for.
+ */
+export function pauseAfter(text: string): number {
+  const trimmed = text.trimEnd()
+  if (/[.!?]["')\]]?$/.test(trimmed)) return 380
+  if (/[:;]$/.test(trimmed)) return 300
+  if (/,$/.test(trimmed)) return 180
+  // A fragment with no terminator is usually a heading or a broken line, and
+  // both want a beat before whatever follows.
+  return 260
 }
 
 export const DEFAULT_VOICE_SHAPE: VoiceShape = {

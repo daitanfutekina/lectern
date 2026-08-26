@@ -205,6 +205,21 @@ body {
   margin-inline: auto;
 }
 
+/*
+  The shelf is not prose and does not want a reading measure.
+
+  `#content > *` is an id selector and beats a bare class, so setting
+  `max-width: none` on `.shelf` alone did nothing and the grid stayed clamped to
+  two columns on a wide window. Matching the id here is what actually wins.
+*/
+#content > .shelf,
+#content > .shelf-header,
+#content > .pdf-pages,
+#content > .epub-host {
+  max-width: none;
+  margin-inline: 0;
+}
+
 .placeholder {
   display: grid;
   place-items: center;
@@ -890,15 +905,15 @@ body.is-home #flag-bar {
 }
 
 /*
-  Three across at most.
+  As many across as the window allows.
 
-  `auto-fill` alone put six or seven tiny covers on a wide window, which is a
-  file listing with pictures rather than a shelf -- a cover has to be big enough
-  to be recognised as one.
+  A fixed cap was worse than the problem it was meant to solve: on a wide
+  screen it left two thirds of the shelf empty. The minimum column width keeps
+  a cover big enough to be recognised as one; the count follows the window.
 */
 .shelf {
   display: grid;
-  max-width: 720px;
+  max-width: none;
   margin-inline: 0;
   gap: 30px 26px;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -1148,21 +1163,56 @@ body.is-home #flag-bar {
 
 /* ── Collapsing the sidebar ────────────────────────────────────────── */
 
-#collapse {
-  padding: 2px 9px;
+/*
+  Sized like the other header controls rather than left to inherit whatever the
+  button element felt like -- it was a different height from everything beside
+  it and the glyph sat off-centre.
+*/
+#collapse,
+#home {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   font: inherit;
-  font-size: 15px;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
 }
 
-#collapse:hover {
+#collapse {
+  width: 26px;
+  padding: 0;
+  font-size: 14px;
+}
+
+#collapse:hover,
+#home:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/*
+  Collapsed, the strip keeps the two controls that get you out of it: the one
+  that expands the sidebar and the one that goes back to the shelf. Hiding both
+  would leave the reader in a book with no way back except a keyboard shortcut
+  nothing mentions.
+*/
+body.is-collapsed #home {
+  width: 32px;
+  overflow: hidden;
+  padding: 0;
+  font-size: 0;
+}
+
+body.is-collapsed #home::before {
+  content: '☰';
+  font-size: 13px;
 }
 
 /*
@@ -1182,7 +1232,6 @@ body.is-collapsed #sidebar-head {
 body.is-collapsed #sidebar-head h1,
 body.is-collapsed #rescan,
 body.is-collapsed #export-index,
-body.is-collapsed #home,
 body.is-collapsed #books,
 body.is-collapsed #flags,
 body.is-collapsed #bookmarks,
