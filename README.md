@@ -9,7 +9,7 @@ Everything is free and offline. No paid service, no account, no network.
 
 - [x] **M1** — Library root, scan, index, Markdown renderer
 - [x] **M2** — Reading UI, progress, bookmarks, resume
-- [ ] **M3** — Speakable blocks, text-to-speech on Markdown and HTML
+- [x] **M3** — Speakable blocks, text-to-speech on Markdown and HTML
 - [ ] **M4** — Mathematics speech and the complexity gate
 - [ ] **M5** — Digital PDF and EPUB adapters
 - [ ] **M6** — OCR pipeline and background queue
@@ -35,8 +35,10 @@ LECTERN_CAPTURE=shot.png npx electron out/main/index.js
 ```
 
 runs the app, screenshots it, reports what is actually in the DOM, and exits.
-`LECTERN_SCROLL`, `LECTERN_CLICK` and `LECTERN_WIDTH` drive it further, which is
-how resuming was verified across three window widths.
+`LECTERN_SCROLL`, `LECTERN_CLICK`, `LECTERN_WAIT` and `LECTERN_WIDTH` drive it
+further, which is how resuming was verified across three window widths. A
+capture run is hidden and muted, so it never takes the screen or reads aloud
+over whoever is using the machine.
 
 ## The library
 

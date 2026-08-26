@@ -72,7 +72,13 @@ function createWindow(): BrowserWindow {
 
   // Paint only once there is something to show, rather than flashing an empty
   // frame while the library scan runs.
-  window.once('ready-to-show', () => window.show())
+  //
+  // A verification run stays hidden and silent. It is still the real
+  // application doing real work, but it must not take the screen or start
+  // talking over whoever is using the machine.
+  const verifying = Boolean(process.env['LECTERN_CAPTURE'])
+  if (verifying) window.webContents.setAudioMuted(true)
+  else window.once('ready-to-show', () => window.show())
 
   // A link in a book opens in the real browser. Nothing navigates this window
   // away from the reader.
@@ -157,6 +163,13 @@ app.whenReady().then(() => {
 
 async function captureAndExit(window: BrowserWindow, path: string): Promise<void> {
   const { writeFile } = await import('node:fs/promises')
+  // Renderer console output, so a failure inside the page is visible from the
+  // command line rather than only to someone with devtools open.
+  const logs: string[] = []
+  window.webContents.on('console-message', (event) => {
+    if (logs.length < 60) logs.push(`${event.level}: ${event.message}`)
+  })
+
   // The listener is wrapped rather than passed directly: `resolve` accepts an
   // argument, which sends TypeScript to the wrong `once` overload.
   await new Promise<void>((resolve) => {
@@ -190,8 +203,9 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     await window.webContents.executeJavaScript(
       `document.querySelector(${JSON.stringify(click)})?.click()`
     )
+    const settle = Number(process.env['LECTERN_WAIT'] ?? '') || 1200
     await new Promise<void>((resolve) => {
-      setTimeout(() => resolve(), 1200)
+      setTimeout(() => resolve(), settle)
     })
   }
 
@@ -224,6 +238,22 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
       return null;
     })(),
     bookmarks: document.querySelectorAll('.bookmark').length,
+    // Speech, read from the real controls rather than from a debug hook.
+    queue: document.querySelector('#speech-position')?.textContent || null,
+    playing: document.querySelector('#play')?.getAttribute('aria-pressed') || null,
+    voices: document.querySelector('#voice')?.options?.length ?? 0,
+    rawVoices: (typeof speechSynthesis !== 'undefined') ? speechSynthesis.getVoices().length : 'NO speechSynthesis',
+    rawVoiceNames: (typeof speechSynthesis !== 'undefined') ? speechSynthesis.getVoices().slice(0,4).map(v => v.name + '/' + v.lang) : [],
+    speaking: (typeof speechSynthesis !== 'undefined') ? speechSynthesis.speaking : null,
+    voice: document.querySelector('#voice')?.value || null,
+    highlighted: (() => {
+      try {
+        const h = CSS.highlights.get('spoken');
+        if (!h) return null;
+        for (const r of h) return r.toString().slice(0, 40);
+        return 'empty';
+      } catch (e) { return 'unsupported'; }
+    })(),
     progressBars: document.querySelectorAll('.progress-fill').length,
     hScroll: (() => {
       const c = document.querySelector('#content');
@@ -232,7 +262,7 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
                scrolls: c.scrollWidth > c.clientWidth + 1 };
     })()
   })`)
-  process.stdout.write(`CAPTURE ${JSON.stringify(report)}\n`)
+  process.stdout.write(`CAPTURE ${JSON.stringify({ ...report, logs })}\n`)
   app.quit()
 }
 

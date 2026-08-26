@@ -16,6 +16,8 @@ import {
 import type { Book, Chapter, LibraryIndex } from '@shared/library'
 import { typeset, configureMacros } from './mathjax'
 import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
+import { extract } from './blocks'
+import { Reader, onVoicesChanged, voices } from './speech'
 
 /**
  * The reading surface. SPEC section 10: no Node access, no filesystem, no
@@ -33,6 +35,9 @@ let current: { bookId: string; file: string } | null = null
  * over the position we are in the middle of returning to.
  */
 let restoring = false
+
+/** One reader for the whole session; chapters are loaded into it. */
+const reader = new Reader()
 
 const el = <T extends HTMLElement>(id: string): T | null => document.querySelector<T>(`#${id}`)
 
@@ -274,8 +279,92 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   const target = at ?? stored?.position ?? START
   restorePosition(container, rendered, target)
 
+  // Speech is loaded from the rendered chapter, and starts where the reader is
+  // rather than at the top -- opening a chapter mid-way and pressing play
+  // should continue, not restart the chapter.
+  const utterances = extract(rendered)
+  const blockAt = Math.min(target.block, rendered.children.length - 1)
+  const nearest = rendered.children[Math.max(0, blockAt)]
+  reader.load(utterances, nearest instanceof HTMLElement ? reader.indexNear(nearest) : 0)
+
   void window.lectern.progress.open(bookId, file)
   restoring = false
+}
+
+/* ── Player ──────────────────────────────────────────────────────────── */
+
+function renderPlayerState(): void {
+  const state = reader.state
+  const play = el<HTMLButtonElement>('play')
+  if (play) {
+    play.textContent = state.playing ? '❚❚ Pause' : '▶ Read aloud'
+    play.setAttribute('aria-pressed', String(state.playing))
+    play.disabled = state.total === 0
+  }
+
+  const position = el<HTMLElement>('speech-position')
+  if (position) {
+    position.textContent = state.total ? `${state.index + 1} / ${state.total}` : ''
+  }
+
+  const rateValue = el<HTMLElement>('rate-value')
+  if (rateValue) rateValue.textContent = `${state.rate.toFixed(1)}×`
+
+  for (const id of ['prev-block', 'next-block', 'prev-section', 'next-section']) {
+    const button = el<HTMLButtonElement>(id)
+    if (button) button.disabled = state.total === 0
+  }
+}
+
+async function setUpPlayer(): Promise<void> {
+  el<HTMLButtonElement>('play')?.addEventListener('click', () => reader.toggle())
+  el<HTMLButtonElement>('prev-block')?.addEventListener('click', () => reader.skip(-1))
+  el<HTMLButtonElement>('next-block')?.addEventListener('click', () => reader.skip(1))
+  el<HTMLButtonElement>('prev-section')?.addEventListener('click', () => reader.skipSection(-1))
+  el<HTMLButtonElement>('next-section')?.addEventListener('click', () => reader.skipSection(1))
+
+  const rate = el<HTMLInputElement>('rate')
+  rate?.addEventListener('input', () => reader.setRate(Number(rate.value)))
+
+  reader.onChange(renderPlayerState)
+  renderPlayerState()
+
+  const select = el<HTMLSelectElement>('voice')
+  if (!select) return
+
+  const fill = (available: SpeechSynthesisVoice[]): void => {
+    if (available.length === 0) return
+    // English voices first: the library is in English, and a list led by voices
+    // that cannot pronounce it is a list nobody scrolls past.
+    const sorted = [...available].sort((a, b) => {
+      const aEnglish = a.lang.startsWith('en') ? 0 : 1
+      const bEnglish = b.lang.startsWith('en') ? 0 : 1
+      return aEnglish - bEnglish || a.name.localeCompare(b.name)
+    })
+
+    const chosen = reader.state.voice
+    select.replaceChildren()
+    for (const voice of sorted) {
+      const option = document.createElement('option')
+      option.value = voice.name
+      option.textContent = `${voice.name} (${voice.lang})`
+      select.append(option)
+    }
+
+    const preferred = sorted.find((voice) => voice.name === chosen) ?? sorted[0]
+    if (preferred) {
+      select.value = preferred.name
+      if (preferred.name !== chosen) reader.setVoice(preferred.name)
+    }
+  }
+
+  select.addEventListener('change', () => reader.setVoice(select.value))
+
+  // Filled now if the voices are ready, and again if they arrive later. On
+  // Windows they took several seconds, and a picker that gave up would stay
+  // empty for the whole session.
+  fill(await voices())
+  onVoicesChanged(() => fill(speechSynthesis.getVoices()))
 }
 
 /* ── Startup ─────────────────────────────────────────────────────────── */
@@ -322,6 +411,24 @@ async function start(): Promise<void> {
       event.preventDefault()
       void addBookmarkHere()
     }
+
+    // Space is the universal play/pause, but only when the reader is not on a
+    // control that uses it -- a focused button would otherwise be pressed too.
+    if (event.key === ' ' && !(event.target instanceof HTMLButtonElement)) {
+      event.preventDefault()
+      reader.toggle()
+    }
+  })
+
+  // Clicking a paragraph starts reading from it, which is the fastest way to
+  // say "read from here" and needs no extra control.
+  el<HTMLElement>('content')?.addEventListener('dblclick', (event) => {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    const block = target.closest('p, h1, h2, h3, h4, li, summary')
+    if (!(block instanceof HTMLElement)) return
+    reader.jumpTo(reader.indexNear(block))
+    reader.play()
   })
 
   if (container) {
@@ -354,6 +461,8 @@ async function start(): Promise<void> {
     window.lectern.progress.get()
   ])
   renderSidebar()
+
+  await setUpPlayer()
 
   const target = resumeTarget()
   if (target) void open(target.bookId, target.file)
