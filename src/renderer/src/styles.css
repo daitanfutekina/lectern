@@ -673,3 +673,17 @@ details.box[open] > summary::before {
   border-radius: var(--radius);
   color: var(--text-muted);
 }
+
+/* Background OCR progress. Present only while a scan is being read. */
+#scan-progress {
+  padding: 8px 24px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-callout);
+  color: var(--accent-2);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+
+#scan-progress[hidden] {
+  display: none;
+}

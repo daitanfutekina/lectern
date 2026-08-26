@@ -18,6 +18,7 @@ import { typeset, configureMacros } from './mathjax'
 import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
 import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utterance } from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
+import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { mathUtterance } from '@shared/math-gate'
 
 /**
@@ -238,6 +239,8 @@ function headingAbove(body: HTMLElement, position: ReadingPosition): string | nu
 /* ── Reading ─────────────────────────────────────────────────────────── */
 
 async function open(bookId: string, file: string, at?: ReadingPosition): Promise<void> {
+  // Two chapters recognising at once would fight over one CPU and both crawl.
+  cancelScan()
   const container = el<HTMLElement>('content')
   if (!container) return
 
@@ -302,6 +305,11 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   // a feature they may not use for a delay they certainly notice.
   void fillMathSpeech(book, utterances, rendered)
 
+  // A scan has no text yet. Recognition runs in the background and rebuilds the
+  // chapter as pages land, so reading is never waiting on it (invariant 7).
+  const marker = rendered.querySelector<HTMLElement>('[data-scan]')
+  if (marker) startScan(bookId, marker, rendered)
+
   void window.lectern.progress.open(bookId, file)
   restoring = false
 }
@@ -355,6 +363,50 @@ async function fillMathSpeech(
   const resumeAt = reader.state.index
   const rebuilt = withMathSpeech(extract(body), displaySpeech)
   reader.load(rebuilt, Math.min(resumeAt, Math.max(0, rebuilt.length - 1)))
+}
+
+/* ── Scanned pages ───────────────────────────────────────────────────── */
+
+function renderScanProgress(progress: ScanProgress): void {
+  const bar = el<HTMLElement>('scan-progress')
+  if (!bar) return
+
+  if (!progress.running && progress.done === 0) {
+    bar.textContent = 'This scan could not be read.'
+    bar.hidden = false
+    return
+  }
+
+  bar.hidden = !progress.running && progress.done >= progress.total
+  const failed = progress.failed > 0 ? `, ${progress.failed} unreadable` : ''
+  bar.textContent = progress.running
+    ? `Reading the scan: ${progress.done} of ${progress.total} pages${failed}`
+    : `Scan read: ${progress.done} of ${progress.total} pages${failed}`
+}
+
+function startScan(bookId: string, marker: HTMLElement, body: HTMLElement): void {
+  const [from, to] = (marker.dataset['scan'] ?? '').split('-').map(Number)
+  if (!Number.isInteger(from) || !Number.isInteger(to)) return
+
+  void scanRange(
+    bookId,
+    from as number,
+    to as number,
+    (pages) => {
+      if (!document.contains(body)) return
+      const html = pagesToHtml(pages)
+      if (!html) return
+
+      // Rebuilt from scratch each time rather than appended to: furniture
+      // removal counts what repeats across the whole range, so one more page
+      // can change what is furniture on the pages before it.
+      body.innerHTML = html
+      const utterances = extract(body)
+      const at = Math.min(reader.state.index, Math.max(0, utterances.length - 1))
+      reader.load(utterances, at)
+    },
+    renderScanProgress
+  )
 }
 
 /* ── Player ──────────────────────────────────────────────────────────── */

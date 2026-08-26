@@ -55,6 +55,28 @@ function pdfjs(): { getDocument: (options: unknown) => { promise: Promise<PdfDoc
   return require('pdfjs-dist/legacy/build/pdf.mjs')
 }
 
+/** The PDF's own bytes, for the renderer to rasterise a scan. */
+export async function pdfBytes(path: string): Promise<Uint8Array | null> {
+  try {
+    return new Uint8Array(await readFile(path))
+  } catch {
+    return null
+  }
+}
+
+/** Page range of a chapter, for the OCR queue. */
+export async function pdfRange(
+  path: string,
+  file: string
+): Promise<{ from: number; to: number } | null> {
+  const book = await openPdf(path)
+  return book.ranges[file] ?? null
+}
+
+export async function isScanned(path: string): Promise<boolean> {
+  return !(await openPdf(path)).digital
+}
+
 export async function openPdf(path: string): Promise<PdfBook> {
   const cached = opened.get(path)
   if (cached) return cached
@@ -165,11 +187,11 @@ export async function pdfChapter(path: string, file: string): Promise<string | n
   const range = book.ranges[file]
   if (!range) return null
 
+  // A scan carries no text to return. The renderer recognises it and fills the
+  // chapter in as pages complete, so the marker tells it where to start rather
+  // than apologising to the reader.
   if (!book.digital) {
-    return (
-      '<p class="notice">This PDF has no text layer. It is a scan, and reading it aloud ' +
-      'needs the OCR pipeline, which is not built yet.</p>'
-    )
+    return `<p class="notice" data-scan="${range.from}-${range.to}">Reading this scan…</p>`
   }
 
   const pages: string[][] = []

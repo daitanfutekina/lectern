@@ -49,6 +49,26 @@ const api = {
       ipcRenderer.invoke('math:configure', macros)
   },
 
+  scan: {
+    /** Raw bytes of a PDF, so the renderer can rasterise its pages. */
+    bytes: (bookId: string): Promise<ArrayBuffer | null> =>
+      ipcRenderer.invoke('scan:bytes', bookId),
+    /** Pages of a range already recognised, in order; nulls are still to do. */
+    cached: (
+      bookId: string,
+      from: number,
+      to: number
+    ): Promise<({ page: number; lines: string[]; confidence: number } | null)[]> =>
+      ipcRenderer.invoke('scan:cached', bookId, from, to),
+    /** Store one recognised page. */
+    store: (
+      bookId: string,
+      page: number,
+      lines: readonly string[],
+      confidence: number
+    ): Promise<void> => ipcRenderer.invoke('scan:store', bookId, page, lines, confidence)
+  },
+
   bookmarks: {
     add: (
       bookId: string,

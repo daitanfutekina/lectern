@@ -6,11 +6,19 @@
     <!--
       No remote origins. SPEC invariant 2: everything works offline, and the
       seven existing books pulling MathJax from a CDN is the defect this
-      replaces. MathJax is vendored under public/.
+      replaces. MathJax, pdf.js and Tesseract are all vendored under public/.
+
+      `blob:` is allowed for workers because Tesseract starts its own from a
+      blob it builds at runtime, and `'wasm-unsafe-eval'` because its engine is
+      WebAssembly. Both widen the policy, and the trade is worth naming: the
+      blob is assembled by a script that came from `'self'`, the WebAssembly is
+      a file in this bundle, and no outside origin can reach the page to plant
+      either. Nothing here relaxes `default-src`, so the page still cannot talk
+      to the network at all.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: data:"
     />
     <title>Lectern</title>
   </head>
@@ -32,6 +40,7 @@
             <p>Choose a chapter.</p>
           </div>
         </div>
+        <div id="scan-progress" hidden></div>
         <div id="player">
           <button id="play" type="button" title="Read aloud (Space)">▶ Read aloud</button>
           <button id="prev-block" type="button" title="Previous sentence">↑</button>

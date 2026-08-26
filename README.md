@@ -12,7 +12,7 @@ Everything is free and offline. No paid service, no account, no network.
 - [x] **M3** — Speakable blocks, text-to-speech on Markdown and HTML
 - [x] **M4** — Mathematics speech and the complexity gate
 - [x] **M5** — Digital PDF and EPUB adapters
-- [ ] **M6** — OCR pipeline and background queue
+- [x] **M6** — OCR pipeline and background queue
 - [ ] **M7** — Flagged passages and index export
 
 Each milestone has an explicit *done when* in [docs/SPEC.md](docs/SPEC.md)

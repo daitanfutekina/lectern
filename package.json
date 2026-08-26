@@ -24,6 +24,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
     "fflate": "^0.8.3",
     "mathjax": "^3.2.2",
     "pdfjs-dist": "^6.2.108",
@@ -37,6 +38,7 @@
     "remark-rehype": "^11.1.2",
     "speech-rule-engine": "^5.0.0-rc.4",
     "temml": "^0.13.4",
+    "tesseract.js": "^7.0.0",
     "unified": "^11.0.5",
     "unist-util-visit": "^5.1.0",
     "yaml": "^2.9.0"

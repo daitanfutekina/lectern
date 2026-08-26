@@ -1,7 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, readChapterSource, saveIndex, scanLibrary } from './library'
 import { configureMath, speakMath } from './math-speech'
+import { pdfBytes } from './pdf'
+import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
 import {
   addBookmark,
   flushProgress,
@@ -15,6 +18,26 @@ import { findBook } from '@shared/library'
 import { bookmarkId } from '@shared/progress'
 import type { LibraryIndex } from '@shared/library'
 import type { ReadingPosition } from '@shared/progress'
+
+/**
+ * The renderer is served from `app://` rather than `file://`.
+ *
+ * A `file://` page is not a real origin, and the restrictions that follow from
+ * that broke two things outright: Tesseract could not `importScripts` inside
+ * its worker, and the Speech Rule Engine hung fetching its rule files. Both are
+ * ordinary web behaviour that only fails on `file://`.
+ *
+ * Registering a standard, secure scheme costs a few lines and removes the whole
+ * class of problem, rather than working around each instance of it.
+ */
+const SCHEME = 'app'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
 
 /**
  * Main process: window, filesystem, library index. Nothing here renders.
@@ -91,7 +114,7 @@ function createWindow(): BrowserWindow {
   if (process.env['ELECTRON_RENDERER_URL']) {
     void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'))
+    void window.loadURL(`${SCHEME}://lectern/index.html`)
   }
 
   return window
@@ -99,6 +122,8 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.lectern.app')
+  configureOcrCache(root())
+  serveRenderer()
 
   ipcMain.handle('library:get', () => library())
   ipcMain.handle('library:rescan', () => library(true))
@@ -119,6 +144,34 @@ app.whenReady().then(() => {
       .slice(0, 2000)
     return speakMath(cleaned)
   })
+
+  ipcMain.handle('scan:bytes', async (_event, bookId: unknown) => {
+    if (typeof bookId !== 'string') return null
+    const book = findBook(await library(), bookId)
+    if (!book || book.format !== 'pdf') return null
+    return pdfBytes(book.path)
+  })
+
+  ipcMain.handle('scan:cached', async (_event, bookId: unknown, from: unknown, to: unknown) => {
+    if (typeof bookId !== 'string' || typeof from !== 'number' || typeof to !== 'number') return []
+    const key = await keyFor(bookId)
+    if (!key) return []
+    return readRange(key, from, to)
+  })
+
+  ipcMain.handle(
+    'scan:store',
+    async (_event, bookId: unknown, page: unknown, lines: unknown, confidence: unknown) => {
+      if (typeof bookId !== 'string' || typeof page !== 'number' || !Array.isArray(lines)) return
+      const key = await keyFor(bookId)
+      if (!key) return
+      await writePage(key, {
+        page,
+        lines: lines.filter((line): line is string => typeof line === 'string'),
+        confidence: typeof confidence === 'number' ? confidence : 0
+      })
+    }
+  )
 
   ipcMain.handle('library:chapter', async (_event, bookId: unknown, file: unknown) => {
     if (typeof bookId !== 'string' || typeof file !== 'string') return null
@@ -240,6 +293,7 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
   const report = await window.webContents.executeJavaScript(`({
     chapters: document.querySelectorAll('.chapter-link').length,
     bookTitles: [...document.querySelectorAll('.book-title')].map((b) => b.textContent).slice(0, 6),
+    scanProgress: document.querySelector('#scan-progress')?.textContent || null,
 
     typesetMath: document.querySelectorAll('mjx-container').length,
     boxes: document.querySelectorAll('.box').length,
@@ -299,6 +353,42 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
   })`)
   process.stdout.write(`CAPTURE ${JSON.stringify({ ...report, logs })}\n`)
   app.quit()
+}
+
+/**
+ * Cache key for a book's recognised pages: path, size and modification time, so
+ * renaming a book keeps an hour of work and editing one discards it.
+ */
+/**
+ * Serve the built renderer over the custom scheme.
+ *
+ * Paths are resolved inside the bundle and refused if they escape it: the
+ * handler is reachable from page content, so a crafted URL must not be able to
+ * read the rest of the disk.
+ */
+function serveRenderer(): void {
+  const bundle = join(__dirname, '../renderer')
+
+  protocol.handle(SCHEME, async (request) => {
+    const { pathname } = new URL(request.url)
+    const relative = decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html'
+    const target = join(bundle, relative)
+
+    if (!target.startsWith(bundle)) return new Response('Forbidden', { status: 403 })
+    return net.fetch(pathToFileURL(target).toString())
+  })
+}
+
+async function keyFor(bookId: string): Promise<string | null> {
+  const book = findBook(await library(), bookId)
+  if (!book) return null
+  try {
+    const { stat } = await import('node:fs/promises')
+    const info = await stat(book.path)
+    return documentKey(book.path, info.size, info.mtimeMs)
+  } catch {
+    return null
+  }
 }
 
 app.on('window-all-closed', () => {
