@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { LibraryIndex } from '@shared/library'
+import type { Bookmark, ChapterProgress, LibraryProgress, ReadingPosition } from '@shared/progress'
 
 /**
  * The bridge. SPEC section 10.
@@ -17,6 +18,34 @@ const api = {
     /** Raw Markdown for one chapter, or null if the book or file is unknown. */
     chapter: (bookId: string, file: string): Promise<string | null> =>
       ipcRenderer.invoke('library:chapter', bookId, file)
+  },
+
+  progress: {
+    /** Every stored reading position and bookmark in the library. */
+    get: (): Promise<LibraryProgress> => ipcRenderer.invoke('progress:get'),
+    /** Store where the reader is. Writes are debounced on the other side. */
+    record: (
+      bookId: string,
+      file: string,
+      position: ReadingPosition,
+      blocks: number
+    ): Promise<ChapterProgress | null> =>
+      ipcRenderer.invoke('progress:record', bookId, file, position, blocks),
+    /** Note which chapter is open, without disturbing its stored position. */
+    open: (bookId: string, file: string): Promise<LibraryProgress | null> =>
+      ipcRenderer.invoke('progress:open', bookId, file)
+  },
+
+  bookmarks: {
+    add: (
+      bookId: string,
+      file: string,
+      position: ReadingPosition,
+      label: string
+    ): Promise<readonly Bookmark[] | null> =>
+      ipcRenderer.invoke('bookmark:add', bookId, file, position, label),
+    remove: (bookId: string, id: string): Promise<readonly Bookmark[] | null> =>
+      ipcRenderer.invoke('bookmark:remove', bookId, id)
   }
 } as const
 

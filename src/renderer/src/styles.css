@@ -437,3 +437,115 @@ details.box[open] > summary::before {
   cursor: default;
   opacity: 0.5;
 }
+
+/* ── Reading progress ──────────────────────────────────────────────── */
+
+.chapter-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chapter-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-done {
+  flex: none;
+  color: var(--success);
+  font-size: 12px;
+}
+
+/*
+  A bar rather than a percentage. The measurement is "furthest block reached",
+  which is honest about roughly where you are and dishonest if dressed up as a
+  number to the percent.
+*/
+.progress-track {
+  display: block;
+  overflow: hidden;
+  height: 2px;
+  margin-top: 6px;
+  border-radius: 1px;
+  background: var(--border-soft);
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.sidebar-hint {
+  padding: 4px 10px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+/* ── Bookmarks ─────────────────────────────────────────────────────── */
+
+#bookmarks {
+  max-height: 34%;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+}
+
+#bookmarks:empty {
+  display: none;
+}
+
+.bookmark {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.bookmark-jump {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bookmark-jump:hover {
+  background: var(--bg-callout);
+}
+
+.bookmark-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-remove {
+  flex: none;
+  width: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bookmark-remove:hover {
+  background: var(--bg-callout);
+  color: var(--danger);
+}
+
+.nav-bookmark {
+  flex: none;
+}

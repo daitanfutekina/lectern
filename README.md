@@ -8,7 +8,7 @@ Everything is free and offline. No paid service, no account, no network.
 ## Roadmap
 
 - [x] **M1** — Library root, scan, index, Markdown renderer
-- [ ] **M2** — Reading UI, progress, bookmarks, resume
+- [x] **M2** — Reading UI, progress, bookmarks, resume
 - [ ] **M3** — Speakable blocks, text-to-speech on Markdown and HTML
 - [ ] **M4** — Mathematics speech and the complexity gate
 - [ ] **M5** — Digital PDF and EPUB adapters
@@ -35,6 +35,8 @@ LECTERN_CAPTURE=shot.png npx electron out/main/index.js
 ```
 
 runs the app, screenshots it, reports what is actually in the DOM, and exits.
+`LECTERN_SCROLL`, `LECTERN_CLICK` and `LECTERN_WIDTH` drive it further, which is
+how resuming was verified across three window widths.
 
 ## The library
 

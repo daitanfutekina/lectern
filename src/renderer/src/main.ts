@@ -3,8 +3,19 @@ import { renderMarkdown } from '@shared/markdown'
 import { splitFrontMatter } from '@shared/manifest'
 import { readingMinutes } from '@shared/outline'
 import { EMPTY_INDEX, findBook, nextChapter, previousChapter } from '@shared/library'
+import {
+  EMPTY_BOOK,
+  EMPTY_PROGRESS,
+  START,
+  fractionRead,
+  isFinished,
+  type Bookmark,
+  type LibraryProgress,
+  type ReadingPosition
+} from '@shared/progress'
 import type { Book, Chapter, LibraryIndex } from '@shared/library'
 import { typeset, configureMacros } from './mathjax'
+import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
 
 /**
  * The reading surface. SPEC section 10: no Node access, no filesystem, no
@@ -13,11 +24,18 @@ import { typeset, configureMacros } from './mathjax'
  */
 
 let index: LibraryIndex = EMPTY_INDEX
+let progress: LibraryProgress = EMPTY_PROGRESS
 let current: { bookId: string; file: string } | null = null
+
+/**
+ * Guards the window between asking for a chapter and its position being
+ * restored. Scroll events in that gap would record the top of the new chapter
+ * over the position we are in the middle of returning to.
+ */
+let restoring = false
 
 const el = <T extends HTMLElement>(id: string): T | null => document.querySelector<T>(`#${id}`)
 
-/** Build DOM, never assign markup from a string. */
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -29,6 +47,14 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node
 }
 
+const bookProgress = (bookId: string) => progress.books[bookId] ?? EMPTY_BOOK
+
+function chapterBody(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.chapter-body')
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
+
 function renderSidebar(): void {
   const books = el<HTMLElement>('books')
   const meta = el<HTMLElement>('library-meta')
@@ -37,27 +63,44 @@ function renderSidebar(): void {
   books.replaceChildren()
 
   if (index.books.length === 0) {
-    const empty = element('p', 'book-title', 'No books found')
-    books.append(empty)
-    const hint = element('p', 'chapter-link')
-    hint.style.color = 'var(--text-faint)'
+    books.append(element('div', 'book-title', 'No books found'))
+    const hint = element('p', 'sidebar-hint')
     hint.textContent = `Put a book folder in ${index.root || 'the library root'}\\books`
     books.append(hint)
   }
 
   for (const book of index.books) {
     books.append(element('div', 'book-title', book.title))
+    const stored = bookProgress(book.id)
+
     for (const chapter of book.chapters) {
+      const chapterProgress = stored.chapters[chapter.file] ?? null
       const button = element('button', 'chapter-link')
       button.type = 'button'
-      button.append(document.createTextNode(chapter.title))
 
-      const detail = element(
-        'span',
-        'meta',
-        `${chapter.words.toLocaleString()} words · ${readingMinutes(chapter.words)} min`
+      const row = element('span', 'chapter-row')
+      row.append(element('span', 'chapter-name', chapter.title))
+      if (isFinished(chapterProgress)) row.append(element('span', 'chapter-done', '✓'))
+      button.append(row)
+
+      button.append(
+        element(
+          'span',
+          'meta',
+          `${chapter.words.toLocaleString()} words · ${readingMinutes(chapter.words)} min`
+        )
       )
-      button.append(detail)
+
+      // A bar rather than a percentage: the useful question is "roughly where am
+      // I", and a number invites precision the measurement does not have.
+      const fraction = fractionRead(chapterProgress)
+      if (fraction > 0) {
+        const track = element('span', 'progress-track')
+        const fill = element('span', 'progress-fill')
+        fill.style.width = `${Math.round(fraction * 100)}%`
+        track.append(fill)
+        button.append(track)
+      }
 
       const isCurrent = current?.bookId === book.id && current.file === chapter.file
       button.setAttribute('aria-current', String(isCurrent))
@@ -72,7 +115,43 @@ function renderSidebar(): void {
       ? `${index.books.length} book${index.books.length === 1 ? '' : 's'} · ${chapters} chapters`
       : index.root
   }
+
+  renderBookmarks()
 }
+
+function renderBookmarks(): void {
+  const panel = el<HTMLElement>('bookmarks')
+  if (!panel) return
+  panel.replaceChildren()
+  if (!current) return
+
+  const book = findBook(index, current.bookId)
+  const marks = bookProgress(current.bookId).bookmarks
+  if (!book || marks.length === 0) return
+
+  panel.append(element('div', 'book-title', 'Bookmarks'))
+
+  for (const mark of marks) {
+    const row = element('div', 'bookmark')
+
+    const jump = element('button', 'bookmark-jump')
+    jump.type = 'button'
+    jump.append(element('span', 'bookmark-label', mark.label))
+    const chapter = book.chapters.find((c) => c.file === mark.chapter)
+    jump.append(element('span', 'meta', chapter?.title ?? mark.chapter))
+    jump.addEventListener('click', () => void open(book.id, mark.chapter, mark.position))
+
+    const remove = element('button', 'bookmark-remove', '×')
+    remove.type = 'button'
+    remove.title = 'Remove bookmark'
+    remove.addEventListener('click', () => void dropBookmark(book.id, mark.id))
+
+    row.append(jump, remove)
+    panel.append(row)
+  }
+}
+
+/* ── Chapter navigation ──────────────────────────────────────────────── */
 
 function renderNav(book: Book | null, chapter: Chapter | null): void {
   const nav = el<HTMLElement>('chapter-nav')
@@ -88,37 +167,90 @@ function renderNav(book: Book | null, chapter: Chapter | null): void {
   back.disabled = previous === null
   if (previous) back.addEventListener('click', () => void open(book.id, previous.file))
 
+  const mark = element('button', 'nav-bookmark', '☆ Bookmark')
+  mark.type = 'button'
+  mark.title = 'Bookmark this spot'
+  mark.addEventListener('click', () => void addBookmarkHere())
+
   const forward = element('button', undefined, next ? `${next.title} →` : 'End of book →')
   forward.type = 'button'
   forward.disabled = next === null
   if (next) forward.addEventListener('click', () => void open(book.id, next.file))
 
-  nav.append(back, forward)
+  nav.append(back, mark, forward)
 }
 
-async function open(bookId: string, file: string): Promise<void> {
-  const content = el<HTMLElement>('content')
-  if (!content) return
+/* ── Bookmarks ───────────────────────────────────────────────────────── */
+
+async function addBookmarkHere(): Promise<void> {
+  const container = el<HTMLElement>('content')
+  const body = chapterBody()
+  if (!current || !container || !body) return
+
+  const book = findBook(index, current.bookId)
+  const chapter = book?.chapters.find((c) => c.file === current?.file)
+  const position = currentPosition(container, body)
+
+  // The label is the nearest heading above the reader rather than a prompt.
+  // A dialog for every bookmark is friction on the one action that has to be
+  // cheap enough to use without thinking.
+  const label = headingAbove(body, position) ?? chapter?.title ?? 'Bookmark'
+
+  const updated = await window.lectern.bookmarks.add(current.bookId, current.file, position, label)
+  if (updated) applyBookmarks(current.bookId, updated)
+}
+
+async function dropBookmark(bookId: string, id: string): Promise<void> {
+  const updated = await window.lectern.bookmarks.remove(bookId, id)
+  if (updated) applyBookmarks(bookId, updated)
+}
+
+function applyBookmarks(bookId: string, bookmarks: readonly Bookmark[]): void {
+  progress = {
+    ...progress,
+    books: { ...progress.books, [bookId]: { ...bookProgress(bookId), bookmarks } }
+  }
+  renderBookmarks()
+}
+
+/** The most recent heading at or above a position, for naming a bookmark. */
+function headingAbove(body: HTMLElement, position: ReadingPosition): string | null {
+  const children = Array.from(body.children)
+  for (let index = Math.min(position.block, children.length - 1); index >= 0; index -= 1) {
+    const node = children[index]
+    if (node instanceof HTMLElement && /^H[1-4]$/.test(node.tagName)) {
+      return node.textContent?.trim() || null
+    }
+  }
+  return null
+}
+
+/* ── Reading ─────────────────────────────────────────────────────────── */
+
+async function open(bookId: string, file: string, at?: ReadingPosition): Promise<void> {
+  const container = el<HTMLElement>('content')
+  if (!container) return
 
   const book = findBook(index, bookId)
   const chapter = book?.chapters.find((c) => c.file === file) ?? null
   if (!book || !chapter) return
 
+  restoring = true
   current = { bookId, file }
   renderSidebar()
   renderNav(book, chapter)
 
   const source = await window.lectern.library.chapter(bookId, file)
   if (source === null) {
-    content.replaceChildren(element('p', 'placeholder', 'That chapter could not be read.'))
+    container.replaceChildren(element('p', 'placeholder', 'That chapter could not be read.'))
+    restoring = false
     return
   }
 
   const { matter, body } = splitFrontMatter(source)
 
   // Macros are book-scoped and must be registered before typesetting, or every
-  // \Nul and \Col in the chapter renders as an error. FINDINGS: they were
-  // defined per-chapter and inconsistently in the source books.
+  // \Nul and \Col in the chapter renders as an error.
   configureMacros(book.macros)
 
   const article = element('article')
@@ -131,45 +263,100 @@ async function open(bookId: string, file: string): Promise<void> {
   rendered.innerHTML = renderMarkdown(body)
   article.append(rendered)
 
-  content.replaceChildren(article)
-  content.scrollTop = 0
+  container.replaceChildren(article)
+  container.scrollTop = 0
 
+  // Typeset before restoring: equations change block heights substantially, and
+  // restoring against pre-typeset geometry lands in the wrong place.
   await typeset(rendered)
+
+  const stored = bookProgress(bookId).chapters[file]
+  const target = at ?? stored?.position ?? START
+  restorePosition(container, rendered, target)
+
+  void window.lectern.progress.open(bookId, file)
+  restoring = false
 }
+
+/* ── Startup ─────────────────────────────────────────────────────────── */
 
 async function load(rescan = false): Promise<void> {
   index = rescan ? await window.lectern.library.rescan() : await window.lectern.library.get()
   renderSidebar()
 }
 
+/** Where the reader left off, or the first chapter of the first book. */
+function resumeTarget(): { bookId: string; file: string } | null {
+  const lastBook = progress.lastBook ? findBook(index, progress.lastBook) : null
+  const lastFile = lastBook ? bookProgress(lastBook.id).lastChapter : null
+
+  if (lastBook && lastFile && lastBook.chapters.some((c) => c.file === lastFile)) {
+    return { bookId: lastBook.id, file: lastFile }
+  }
+
+  const first = index.books[0]
+  const chapter = first?.chapters[0]
+  return first && chapter ? { bookId: first.id, file: chapter.file } : null
+}
+
 async function start(): Promise<void> {
+  const container = el<HTMLElement>('content')
+
   el<HTMLButtonElement>('rescan')?.addEventListener('click', () => void load(true))
 
-  // Arrow keys move between chapters, but never while the reader is typing into
-  // something or has focused a control that uses them itself.
   document.addEventListener('keydown', (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
     if (!current) return
     const book = findBook(index, current.bookId)
     if (!book) return
 
-    if (event.key === 'ArrowRight' && event.altKey) {
+    if (event.altKey && event.key === 'ArrowRight') {
       const next = nextChapter(book, current.file)
       if (next) void open(book.id, next.file)
     }
-    if (event.key === 'ArrowLeft' && event.altKey) {
+    if (event.altKey && event.key === 'ArrowLeft') {
       const previous = previousChapter(book, current.file)
       if (previous) void open(book.id, previous.file)
     }
+    if (event.ctrlKey && event.key.toLowerCase() === 'd') {
+      event.preventDefault()
+      void addBookmarkHere()
+    }
   })
 
-  await load()
+  if (container) {
+    trackPosition(container, chapterBody, (position, blocks) => {
+      if (!current || restoring) return
+      void window.lectern.progress
+        .record(current.bookId, current.file, position, blocks)
+        .then((updated) => {
+          if (!updated || !current) return
+          const stored = bookProgress(current.bookId)
+          progress = {
+            ...progress,
+            lastBook: current.bookId,
+            books: {
+              ...progress.books,
+              [current.bookId]: {
+                ...stored,
+                lastChapter: current.file,
+                chapters: { ...stored.chapters, [current.file]: updated }
+              }
+            }
+          }
+          renderSidebar()
+        })
+    })
+  }
 
-  // Open the first chapter of the first book, so a fresh launch shows a book
-  // rather than an instruction to click something.
-  const first = index.books[0]
-  const chapter = first?.chapters[0]
-  if (first && chapter) void open(first.id, chapter.file)
+  ;[index, progress] = await Promise.all([
+    window.lectern.library.get(),
+    window.lectern.progress.get()
+  ])
+  renderSidebar()
+
+  const target = resumeTarget()
+  if (target) void open(target.bookId, target.file)
 }
 
 void start()

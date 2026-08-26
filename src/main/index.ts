@@ -1,8 +1,19 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { DEFAULT_ROOT, readChapterSource, saveIndex, scanLibrary } from './library'
+import {
+  addBookmark,
+  flushProgress,
+  getProgress,
+  loadProgress,
+  recordOpen,
+  recordPosition,
+  removeBookmark
+} from './progress'
 import { findBook } from '@shared/library'
+import { bookmarkId } from '@shared/progress'
 import type { LibraryIndex } from '@shared/library'
+import type { ReadingPosition } from '@shared/progress'
 
 /**
  * Main process: window, filesystem, library index. Nothing here renders.
@@ -26,9 +37,22 @@ function root(): string {
   return DEFAULT_ROOT
 }
 
+/**
+ * IPC arguments arrive as `unknown` and are shaped by the renderer, which is
+ * the least trusted process. Nothing is stored without being checked here.
+ */
+function isPosition(value: unknown): value is ReadingPosition {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate['block'] === 'number' && typeof candidate['within'] === 'number'
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1100,
+    // Width is overridable so a resize can be verified end to end: the point
+    // of anchoring to blocks is that reopening narrower lands on the same
+    // paragraph, not the same pixel.
+    width: Number(process.env['LECTERN_WIDTH']) || 1100,
     height: 820,
     minWidth: 640,
     minHeight: 480,
@@ -79,6 +103,44 @@ app.whenReady().then(() => {
     return readChapterSource(book, file)
   })
 
+  ipcMain.handle('progress:get', async () => loadProgress(root()))
+
+  ipcMain.handle(
+    'progress:record',
+    (_event, bookId: unknown, file: unknown, position: unknown, blocks: unknown) => {
+      if (typeof bookId !== 'string' || typeof file !== 'string') return null
+      if (typeof blocks !== 'number' || !isPosition(position)) return null
+      return recordPosition(bookId, file, position, blocks)
+    }
+  )
+
+  ipcMain.handle('progress:open', (_event, bookId: unknown, file: unknown) => {
+    if (typeof bookId !== 'string' || typeof file !== 'string') return null
+    recordOpen(bookId, file)
+    return getProgress()
+  })
+
+  ipcMain.handle(
+    'bookmark:add',
+    (_event, bookId: unknown, file: unknown, position: unknown, label: unknown) => {
+      if (typeof bookId !== 'string' || typeof file !== 'string') return null
+      if (!isPosition(position)) return null
+      const now = Date.now()
+      return addBookmark(bookId, {
+        id: bookmarkId(now, Math.random()),
+        chapter: file,
+        position,
+        label: typeof label === 'string' && label.trim() ? label.trim().slice(0, 120) : 'Bookmark',
+        createdAt: now
+      })
+    }
+  )
+
+  ipcMain.handle('bookmark:remove', (_event, bookId: unknown, id: unknown) => {
+    if (typeof bookId !== 'string' || typeof id !== 'string') return null
+    return removeBookmark(bookId, id)
+  })
+
   const window = createWindow()
 
   // Verification hook. "Does a chapter actually render" is the only question
@@ -105,6 +167,34 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     setTimeout(() => resolve(), 6000)
   })
 
+  /*
+    Optional second half of the hook: scroll somewhere, then quit. Resuming is
+    the whole point of M2 and cannot be verified in one run -- it needs a
+    session that reads and leaves, and a second that comes back. The wait after
+    scrolling is longer than the progress debounce, so the position is recorded
+    the way it would be for a real reader.
+  */
+  const scrollTo = Number(process.env['LECTERN_SCROLL'] ?? '')
+  if (Number.isFinite(scrollTo) && scrollTo > 0) {
+    await window.webContents.executeJavaScript(
+      `document.querySelector('#content').scrollTo({ top: ${scrollTo}, behavior: 'instant' })`
+    )
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), 1600)
+    })
+  }
+
+  // Click something before capturing, for verifying a milestone's controls.
+  const click = process.env['LECTERN_CLICK']
+  if (click) {
+    await window.webContents.executeJavaScript(
+      `document.querySelector(${JSON.stringify(click)})?.click()`
+    )
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), 1200)
+    })
+  }
+
   const image = await window.webContents.capturePage()
   await writeFile(path, image.toPNG())
 
@@ -117,6 +207,24 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     // Whether the reader itself scrolls sideways -- the only overflow that is
     // visible to a reader. MathJax's internal glyph pieces always report huge
     // widths and are clipped, so measuring them says nothing.
+    scrollTop: Math.round(document.querySelector('#content')?.scrollTop ?? -1),
+    blocks: document.querySelector('.chapter-body')?.children.length ?? 0,
+    // What the reader is actually looking at. Comparing this across window
+    // widths is the real test of the anchoring; comparing scrollTop is not.
+    atTop: (() => {
+      const c = document.querySelector('#content');
+      const b = document.querySelector('.chapter-body');
+      if (!c || !b) return null;
+      const y = c.getBoundingClientRect().top;
+      const kids = [...b.children];
+      for (let i = 0; i < kids.length; i += 1) {
+        const r = kids[i].getBoundingClientRect();
+        if (r.bottom > y + 4) return i + ': ' + (kids[i].textContent || '').trim().slice(0, 50);
+      }
+      return null;
+    })(),
+    bookmarks: document.querySelectorAll('.bookmark').length,
+    progressBars: document.querySelectorAll('.progress-fill').length,
     hScroll: (() => {
       const c = document.querySelector('#content');
       if (!c) return null;
@@ -131,3 +239,19 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+/**
+ * The debounce must not eat the last write. Closing the window a moment after
+ * reading is the most ordinary way to leave, and it is exactly the case where
+ * an unflushed position would be lost.
+ */
+app.on('before-quit', (event) => {
+  if (flushed) return
+  event.preventDefault()
+  void flushProgress().then(() => {
+    flushed = true
+    app.quit()
+  })
+})
+
+let flushed = false
