@@ -74,6 +74,23 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
     picker.append(group)
   }
 
+  /*
+    Characters sit in the voice list, between the neural voices they run on and
+    the system ones. A character is a conversion rather than a voice, which
+    matters to the code and not to the reader: they are choosing who reads to
+    them, and that belongs where voices are chosen. What stays in its own
+    section below is only what has no equivalent for an ordinary voice -- the
+    pitch it has to be shifted by, and the speech prepared for it so far.
+  */
+  if (context.neuralVoices.length > 0 && context.characters.ready) {
+    const group = document.createElement('optgroup')
+    group.label = 'Character'
+    for (const name of context.characters.names) {
+      group.append(option(`character:${name}`, prettyCharacter(name)))
+    }
+    if (group.children.length > 0) picker.append(group)
+  }
+
   const systemGroup = document.createElement('optgroup')
   systemGroup.label = 'System'
   for (const voice of context.systemVoices) {
@@ -89,11 +106,13 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
     the first neural voice, then the first system one, means it always shows
     what is actually going to speak.
   */
-  const stored = context.settings.voiceId
-    ? context.settings.neural
-      ? `piper:${context.settings.voiceId}`
-      : context.settings.voiceId
-    : ''
+  const stored = context.settings.character
+    ? `character:${context.settings.character}`
+    : context.settings.voiceId
+      ? context.settings.neural
+        ? `piper:${context.settings.voiceId}`
+        : context.settings.voiceId
+      : ''
   const fallback = context.neuralVoices[0]
     ? `piper:${context.neuralVoices[0].id}`
     : (context.systemVoices[0]?.name ?? '')
@@ -102,10 +121,26 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
   if (!picker.value) picker.value = fallback
   picker.addEventListener('change', () => {
     const value = picker.value
+
+    if (value.startsWith('character:')) {
+      // A character runs on top of a neural voice, so one is kept underneath it.
+      const base =
+        context.settings.neural && context.settings.voiceId
+          ? context.settings.voiceId
+          : context.neuralVoices[0]?.id
+      if (!base) return
+      context.onChange({
+        neural: true,
+        voiceId: base,
+        character: value.slice('character:'.length)
+      })
+      return
+    }
+
     context.onChange(
       value.startsWith('piper:')
-        ? { neural: true, voiceId: value.slice('piper:'.length) }
-        : { neural: false, voiceId: value }
+        ? { neural: true, voiceId: value.slice('piper:'.length), character: null }
+        : { neural: false, voiceId: value, character: null }
     )
   })
   voiceControls.push(row('Voice', picker))
@@ -201,16 +236,6 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
       )
     )
   } else {
-    const picker = document.createElement('select')
-    picker.className = 'settings-select'
-    picker.append(option('', 'None'))
-    for (const name of context.characters.names) picker.append(option(name, prettyCharacter(name)))
-    picker.value = context.settings.character ?? ''
-    picker.addEventListener('change', () =>
-      context.onChange({ character: picker.value || null })
-    )
-    characterControls.push(row('Character', picker))
-
     characterControls.push(
       slider(
         'Pitch',

@@ -988,6 +988,28 @@ async function setUpPlayer(): Promise<void> {
       select.append(group)
     }
 
+    /*
+      Characters belong in the voice list.
+
+      They were originally kept out of it, on the grounds that a character is a
+      conversion applied to a neural voice rather than a voice of its own. That
+      is true of the code and irrelevant to the reader, who wants to choose who
+      reads to them from the place voices are chosen. The distinction survives
+      where it is useful -- the pitch and the prepared-speech controls are still
+      in their own section -- and nowhere else.
+    */
+    if (neural.length > 0 && characters.ready && characters.names.length > 0) {
+      const group = document.createElement('optgroup')
+      group.label = 'Character'
+      for (const name of characters.names) {
+        const option = document.createElement('option')
+        option.value = `character:${name}`
+        option.textContent = prettyCharacter(name)
+        group.append(option)
+      }
+      select.append(group)
+    }
+
     for (const voice of sorted) {
       const option = document.createElement('option')
       option.value = voice.name
@@ -995,13 +1017,15 @@ async function setUpPlayer(): Promise<void> {
       select.append(option)
     }
 
-    // A reader who installed a neural voice did so because the system ones
-    // were not good enough, so it stays selected across a refill.
-    const first = neural[0]
-    if (first) {
-      select.value = `piper:${first.id}`
-      return
-    }
+    /*
+      Whatever the reader actually chose.
+
+      This used to reset to the first neural voice on every refill, so choosing
+      a different one -- or a character -- was undone the moment the system
+      voice list arrived a moment later.
+    */
+    select.value = selectedVoiceValue(neural)
+    if (select.value) return
 
     const preferred = sorted.find((voice) => voice.name === chosen) ?? sorted[0]
     if (preferred) {
@@ -1011,20 +1035,34 @@ async function setUpPlayer(): Promise<void> {
   }
 
   select.addEventListener('change', () => {
-    if (select.value.startsWith('piper:')) {
-      reader.setNeuralVoice(select.value.slice('piper:'.length))
+    const value = select.value
+
+    if (value.startsWith('character:')) {
+      // A character needs a neural voice under it, so one is chosen here if the
+      // reader has not picked one themselves.
+      const base = settings.voiceId && settings.neural ? settings.voiceId : neural[0]?.id
+      if (!base) return
+      changeSettings({ neural: true, voiceId: base, character: value.slice('character:'.length) })
+      return
+    }
+
+    if (value.startsWith('piper:')) {
+      changeSettings({ neural: true, voiceId: value.slice('piper:'.length), character: null })
     } else {
-      reader.setNeuralVoice(null)
-      reader.setVoice(select.value)
+      changeSettings({ neural: false, voiceId: value, character: null })
     }
   })
 
   if (neural.length > 0) {
-    // A reader who installed one wants it used.
-    const first = neural[0]
-    if (first) {
-      select.value = `piper:${first.id}`
-      reader.setNeuralVoice(first.id)
+    const stored = selectedVoiceValue(neural)
+    if (stored) select.value = stored
+    else {
+      // A reader who installed one wants it used.
+      const first = neural[0]
+      if (first) {
+        select.value = `piper:${first.id}`
+        changeSettings({ neural: true, voiceId: first.id })
+      }
     }
   } else {
     const folder = await voiceFolder()
@@ -1232,19 +1270,15 @@ async function showSettings(): Promise<void> {
       lang: voice.lang
     })),
     voicesFolder: await voiceFolder(),
-    characters: await characterList(),
+    characters,
     store: await storeSize(),
     onClearStore: (done) => {
       void window.lectern.voice.clearStore().then(() => done())
     },
     onChange: (change) => {
-      void window.lectern.settings.set(change).then((updated) => {
-        settings = updated
-        applySettings()
-        // Re-rendered so every readout reflects what was actually stored,
-        // which is not always what was asked for -- the ranges are clamped.
-        void showSettings()
-      })
+      // Re-rendered so every readout reflects what was actually stored, which
+      // is not always what was asked for -- the ranges are clamped.
+      changeSettings(change, () => void showSettings())
     },
     onReveal: () => void window.lectern.settings.reveal(),
     onRescan: () => void load(true).then(showHome),
@@ -1304,6 +1338,57 @@ async function characterList(): Promise<{ names: string[]; ready: boolean; folde
   } catch {
     return { names: [], ready: false, folder: '' }
   }
+}
+
+/**
+ * The picker value the stored settings describe, or '' if nothing is stored.
+ *
+ * A character takes precedence over the base voice it runs on: it is the thing
+ * the reader hears, so it is the thing the picker should say.
+ */
+function selectedVoiceValue(neural: readonly { id: string }[]): string {
+  if (settings.character && characters.names.includes(settings.character)) {
+    return `character:${settings.character}`
+  }
+  if (settings.neural && settings.voiceId) {
+    return neural.some((voice) => voice.id === settings.voiceId)
+      ? `piper:${settings.voiceId}`
+      : ''
+  }
+  return settings.voiceId ?? ''
+}
+
+/** A folder name is a folder name; `kasane-teto` reads better as `Kasane Teto`. */
+function prettyCharacter(name: string): string {
+  return name
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+/**
+ * Characters installed, held so the player's picker can list them without
+ * asking the main process every time it refills.
+ */
+let characters: { names: string[]; ready: boolean; folder: string } = {
+  names: [],
+  ready: false,
+  folder: ''
+}
+
+/**
+ * Apply and persist a settings change.
+ *
+ * Shared by the settings page and the player's voice picker. The player used to
+ * talk only to the reader, which meant a voice chosen while reading was
+ * forgotten on the next launch and disagreed with what settings showed.
+ */
+function changeSettings(change: Partial<Settings>, after?: () => void): void {
+  void window.lectern.settings.set(change).then((updated) => {
+    settings = updated
+    applySettings()
+    after?.()
+  })
 }
 
 /** How much disk prepared speech is using, or nothing when unavailable. */
@@ -1457,9 +1542,18 @@ async function start(): Promise<void> {
 
   setUpFlagging()
   setUpDropTarget()
-  await setUpPlayer()
 
+  /*
+    Settings and characters before the player, not after.
+
+    The player fills its voice picker from both, so loading them afterwards
+    meant the picker was built against the defaults and never rebuilt: the
+    stored voice looked forgotten, and characters did not appear at all.
+  */
   settings = await window.lectern.settings.get()
+  characters = await characterList()
+
+  await setUpPlayer()
   applySettings()
 
   flags = (await window.lectern.flags.get()).flags

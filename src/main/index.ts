@@ -634,6 +634,9 @@ LIVE-RELOAD-MARKER
     shelfIds: [...document.querySelectorAll('.shelf-card')].map((c) => c.dataset.book).slice(0, 6),
     flagCount: document.querySelectorAll('.flag').length,
     prepareBar: document.querySelector('#prepare-progress')?.textContent || null,
+    // The player's own voice picker: what it offers and what is selected.
+    playerVoices: [...(document.querySelector('#voice')?.options ?? [])].map((o) => o.value),
+    playerVoice: document.querySelector('#voice')?.value ?? null,
     prepareHidden: document.querySelector('#prepare-progress')?.hidden ?? null,
     // The settings page, read from the controls themselves rather than from
     // what we believe we rendered.
