@@ -43,6 +43,11 @@ const SKIPPED: ReadonlyArray<readonly [string, SkipReason]> = [
  */
 function skipReasonFor(element: HTMLElement): SkipReason | null {
   for (const [tag, reason] of SKIPPED) if (element.tagName === tag) return reason
+  // An adapter can mark something it produced as furniture. PDF page markers
+  // use this: they are a landmark for someone following on paper, and reading
+  // "Page 47" aloud every page is exactly the defect the pipeline exists to
+  // avoid.
+  if (element.dataset['speak'] === 'no') return 'navigation'
   return null
 }
 

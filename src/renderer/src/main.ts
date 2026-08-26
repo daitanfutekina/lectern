@@ -110,6 +110,10 @@ function renderSidebar(): void {
 
       const isCurrent = current?.bookId === book.id && current.file === chapter.file
       button.setAttribute('aria-current', String(isCurrent))
+      // Addressable, so a verification run can open a specific chapter rather
+      // than counting positions in a list that changes as books are added.
+      button.dataset['book'] = book.id
+      button.dataset['chapter'] = chapter.file
       button.addEventListener('click', () => void open(book.id, chapter.file))
       books.append(button)
     }
@@ -253,7 +257,12 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
     return
   }
 
-  const { matter, body } = splitFrontMatter(source)
+  // Markdown books carry front matter and go through the pipeline. EPUB and
+  // PDF chapters arrive as HTML already, prepared by their adapter in main.
+  const isMarkdown = book.format === 'markdown'
+  const { matter, body } = isMarkdown
+    ? splitFrontMatter(source)
+    : { matter: { title: null, crumb: null }, body: source }
 
   // Macros are book-scoped and must be registered before typesetting, or every
   // \Nul and \Col in the chapter renders as an error.
@@ -266,7 +275,7 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   const rendered = element('div', 'chapter-body')
   // The only place markup is assigned from a string. The source is the user's
   // own library on their own disk, and the pipeline that produced it is ours.
-  rendered.innerHTML = renderMarkdown(body)
+  rendered.innerHTML = isMarkdown ? renderMarkdown(body) : body
   article.append(rendered)
 
   container.replaceChildren(article)

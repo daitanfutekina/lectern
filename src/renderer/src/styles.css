@@ -657,3 +657,19 @@ details.box[open] > summary::before {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* PDF page landmarks and adapter notices. */
+.page-mark {
+  margin: 2em 0 0.8em;
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.notice {
+  padding: 14px 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+}

@@ -239,6 +239,8 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
 
   const report = await window.webContents.executeJavaScript(`({
     chapters: document.querySelectorAll('.chapter-link').length,
+    bookTitles: [...document.querySelectorAll('.book-title')].map((b) => b.textContent).slice(0, 6),
+
     typesetMath: document.querySelectorAll('mjx-container').length,
     boxes: document.querySelectorAll('.box').length,
     heading: document.querySelector('#content h1')?.textContent ?? null,

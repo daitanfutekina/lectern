@@ -2,6 +2,8 @@ import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseManifest, splitFrontMatter } from '@shared/manifest'
 import { extractHeadings, countWords } from '@shared/outline'
+import { epubChapter, openEpub } from './epub'
+import { openPdf, pdfChapter } from './pdf'
 import type { Book, Chapter, DocumentFormat, LibraryIndex } from '@shared/library'
 
 /**
@@ -15,6 +17,8 @@ import type { Book, Chapter, DocumentFormat, LibraryIndex } from '@shared/librar
 export const DEFAULT_ROOT = 'C:\\Library'
 
 const BOOKS_DIR = 'books'
+const EPUBS_DIR = 'epubs'
+const PDFS_DIR = 'pdfs'
 const STATE_DIR = '.library'
 const INDEX_FILE = 'index.json'
 
@@ -97,25 +101,98 @@ async function readBook(booksPath: string, id: string): Promise<Book | null> {
   }
 }
 
+/**
+ * A single-file book: one EPUB or one PDF.
+ *
+ * Folder books and file books differ only here. Everything downstream sees the
+ * same shape -- an id, a title, an ordered list of chapters -- which is what
+ * lets one reading surface serve four formats.
+ */
+async function readFileBook(dir: string, name: string, format: DocumentFormat): Promise<Book | null> {
+  const path = join(dir, name)
+  const id = `${format}:${name}`
+
+  if (format === 'epub') {
+    const book = await openEpub(path)
+    if (book.chapters.length === 0) return null
+    return {
+      id,
+      title: book.structure.title ?? name.replace(/\.epub$/i, ''),
+      format,
+      path,
+      chapters: book.chapters,
+      macros: {}
+    }
+  }
+
+  const book = await openPdf(path)
+  if (book.chapters.length === 0) return null
+  return {
+    id,
+    // A scan is listed and openable, and says what it needs. Hiding it would
+    // leave the reader wondering why a file they can see is not in the library.
+    title: `${name.replace(/\.pdf$/i, '')}${book.digital ? '' : ' (scanned)'}`,
+    format,
+    path,
+    chapters: book.chapters,
+    macros: {}
+  }
+}
+
+async function scanFileBooks(
+  root: string,
+  dir: string,
+  extension: string,
+  format: DocumentFormat
+): Promise<Book[]> {
+  const path = join(root, dir)
+  if (!(await isDirectory(path))) return []
+
+  const names = (await readdir(path)).filter((n) => n.toLowerCase().endsWith(extension)).sort()
+  const books = await Promise.all(
+    names.map(async (name) => {
+      try {
+        return await readFileBook(path, name, format)
+      } catch {
+        // A DRM-protected or corrupt file must not cost the rest of the shelf.
+        return null
+      }
+    })
+  )
+  return books.filter((book): book is Book => book !== null)
+}
+
 /** Scan the root. One unreadable book must not cost the whole library. */
 export async function scanLibrary(root: string): Promise<LibraryIndex> {
   const booksPath = join(root, BOOKS_DIR)
   const scannedAt = Date.now()
 
-  if (!(await isDirectory(booksPath))) return { root, scannedAt, books: [] }
+  const folderBooks = (await isDirectory(booksPath))
+    ? await Promise.all(
+        (await readdir(booksPath)).sort().map(async (id) => {
+          try {
+            return await readBook(booksPath, id)
+          } catch {
+            return null
+          }
+        })
+      )
+    : []
 
-  const ids = (await readdir(booksPath)).sort()
-  const results = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        return await readBook(booksPath, id)
-      } catch {
-        return null
-      }
-    })
-  )
+  const [epubs, pdfs] = await Promise.all([
+    scanFileBooks(root, EPUBS_DIR, '.epub', 'epub'),
+    scanFileBooks(root, PDFS_DIR, '.pdf', 'pdf')
+  ])
 
-  return { root, scannedAt, books: results.filter((book): book is Book => book !== null) }
+  return {
+    root,
+    scannedAt,
+    books: [
+      ...folderBooks.filter((book): book is Book => book !== null),
+      ...epubs,
+      ...pdfs
+    ]
+  }
 }
 
 /**
@@ -133,10 +210,19 @@ export async function saveIndex(index: LibraryIndex): Promise<void> {
   }
 }
 
-/** Read a chapter's raw Markdown. The renderer turns it into HTML. */
+/**
+ * A chapter's content, in whatever form its format produces.
+ *
+ * Markdown books return Markdown; the others return HTML. The renderer decides
+ * what to do with it from the book's format, which is the one place the four
+ * formats are still distinguishable.
+ */
 export async function readChapterSource(book: Book, file: string): Promise<string | null> {
   // The file must be one the scan already found, or a crafted name could read
   // anything on disk. Membership in the book's own chapter list is the check.
   if (!book.chapters.some((chapter) => chapter.file === file)) return null
+
+  if (book.format === 'epub') return epubChapter(book.path, file)
+  if (book.format === 'pdf') return pdfChapter(book.path, file)
   return readIfPresent(join(book.path, file))
 }

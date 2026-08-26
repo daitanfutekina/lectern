@@ -11,7 +11,7 @@ Everything is free and offline. No paid service, no account, no network.
 - [x] **M2** — Reading UI, progress, bookmarks, resume
 - [x] **M3** — Speakable blocks, text-to-speech on Markdown and HTML
 - [x] **M4** — Mathematics speech and the complexity gate
-- [ ] **M5** — Digital PDF and EPUB adapters
+- [x] **M5** — Digital PDF and EPUB adapters
 - [ ] **M6** — OCR pipeline and background queue
 - [ ] **M7** — Flagged passages and index export
 
