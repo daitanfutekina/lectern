@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { LibraryIndex } from '@shared/library'
 import type { Bookmark, ChapterProgress, LibraryProgress, ReadingPosition } from '@shared/progress'
 import type { Flag, FlagStore } from '@shared/flags'
+import type { PiperVoice, VoiceShape } from '@shared/voice'
 
 /**
  * The bridge. SPEC section 10.
@@ -71,6 +72,25 @@ const api = {
     /** Register a book's macros before converting any of its equations. */
     configure: (macros: Readonly<Record<string, string>>): Promise<void> =>
       ipcRenderer.invoke('math:configure', macros)
+  },
+
+  voice: {
+    /** Neural voices present on disk. Empty until one is installed. */
+    list: (): Promise<PiperVoice[]> => ipcRenderer.invoke('voice:list'),
+    /**
+     * Synthesise one utterance. Returns 16-bit PCM for the renderer to play,
+     * because the main process has no audio output and the renderer already
+     * owns the queue.
+     */
+    speak: (
+      voiceId: string,
+      text: string,
+      shape: VoiceShape,
+      speed: number
+    ): Promise<{ pcm: Int16Array; sampleRate: number } | null> =>
+      ipcRenderer.invoke('voice:speak', voiceId, text, shape, speed),
+    /** Where voices are installed, for the message shown when there are none. */
+    folder: (): Promise<string> => ipcRenderer.invoke('voice:folder')
   },
 
   flags: {

@@ -1,4 +1,6 @@
 import { clampRate } from '@shared/speech'
+import { BOOK_VOICE, speak as speakNeural, type Playing } from './neural-voice'
+import type { VoiceShape } from '@shared/voice'
 import { rangeWithin, sourceIndex, type Utterance } from './blocks'
 
 /**
@@ -20,6 +22,8 @@ export interface SpeechState {
   readonly total: number
   readonly rate: number
   readonly voice: string | null
+  /** True when a neural voice is speaking rather than a system one. */
+  readonly neural: boolean
 }
 
 type Listener = (state: SpeechState) => void
@@ -39,6 +43,15 @@ export class Reader {
   private listeners = new Set<Listener>()
 
   /**
+   * A neural voice, when one is chosen. Held separately from `voiceName`
+   * because the two engines are different in kind: one is asked to speak, the
+   * other returns audio to be played.
+   */
+  private neuralVoice: string | null = null
+  private shape: VoiceShape = BOOK_VOICE
+  private playing_: Playing | null = null
+
+  /**
    * Set when we stop speech ourselves. `speechSynthesis.cancel()` fires `end`
    * on the current utterance exactly as a natural finish does, so without this
    * flag every pause immediately advances the queue by one.
@@ -47,6 +60,9 @@ export class Reader {
 
   /** The utterance currently with the engine, so a stale `end` can be ignored. */
   private live: SpeechSynthesisUtterance | null = null
+
+  /** Identifies the in-flight neural utterance, so a stale one cannot advance. */
+  private neuralToken: object | null = null
 
   load(utterances: Utterance[], startAt = 0): void {
     this.stop()
@@ -66,8 +82,26 @@ export class Reader {
       index: this.at,
       total: this.queue.length,
       rate: this.rate,
-      voice: this.voiceName
+      voice: this.neuralVoice ?? this.voiceName,
+      neural: this.neuralVoice !== null
     }
+  }
+
+  /** Choose a neural voice, or pass null to fall back to the system voices. */
+  setNeuralVoice(id: string | null): void {
+    this.neuralVoice = id
+    if (this.playing) this.restartCurrent()
+    else this.emit()
+  }
+
+  setShape(shape: VoiceShape): void {
+    this.shape = shape
+    if (this.playing) this.restartCurrent()
+    else this.emit()
+  }
+
+  currentShape(): VoiceShape {
+    return this.shape
   }
 
   setRate(rate: number): void {
@@ -166,6 +200,8 @@ export class Reader {
   private cancel(): void {
     this.interrupting = true
     this.live = null
+    this.playing_?.stop()
+    this.playing_ = null
     speechSynthesis.cancel()
     this.interrupting = false
   }
@@ -176,6 +212,11 @@ export class Reader {
       this.playing = false
       this.clearHighlight()
       this.emit()
+      return
+    }
+
+    if (this.neuralVoice) {
+      void this.speakNeuralCurrent(utterance, this.neuralVoice)
       return
     }
 
@@ -219,6 +260,56 @@ export class Reader {
     this.live = spoken
     this.showElement(utterance.element)
     speechSynthesis.speak(spoken)
+  }
+
+  /**
+   * Speak through a neural voice.
+   *
+   * The engine returns audio rather than speaking, so advancing the queue hangs
+   * off the buffer finishing rather than off an `end` event -- and the guard
+   * against a stale finish is the same one the system path needs.
+   */
+  private async speakNeuralCurrent(utterance: Utterance, voiceId: string): Promise<void> {
+    const token = {}
+    this.neuralToken = token
+
+    let playing: Playing
+    try {
+      playing = await speakNeural(
+        { text: utterance.text, voiceId, shape: this.shape, speed: this.rate },
+        (charIndex) => {
+          if (this.neuralToken !== token) return
+          this.highlightWord(utterance, charIndex, 0)
+        }
+      )
+    } catch {
+      this.playing = false
+      this.emit()
+      return
+    }
+
+    // Cancelled, or moved on, while the audio was being generated.
+    if (this.neuralToken !== token || !this.playing) {
+      playing.stop()
+      return
+    }
+
+    this.playing_ = playing
+    this.showElement(utterance.element)
+
+    await playing.done
+    if (this.neuralToken !== token || !this.playing) return
+
+    this.playing_ = null
+    if (this.at + 1 >= this.queue.length) {
+      this.playing = false
+      this.clearHighlight()
+      this.emit()
+      return
+    }
+    this.at += 1
+    this.speakCurrent()
+    this.emit()
   }
 
   /**

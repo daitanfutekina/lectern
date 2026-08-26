@@ -9,6 +9,8 @@ import { cachedPages, configureOcrCache, documentKey, readRange, writePage } fro
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
 import { watchLibrary } from './watch'
 import { addDocuments, configureDocuments } from './documents'
+import { configurePiper, listVoices, speak as speakPiper } from './piper'
+import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { flagId, type Flag, type FlagKind } from '@shared/flags'
 import {
   addBookmark,
@@ -163,6 +165,7 @@ app.whenReady().then(() => {
   configureOcrCache(root())
   configureFlags(root())
   configureDocuments(root())
+  configurePiper(root())
   serveRenderer()
 
   ipcMain.handle('library:get', () => library())
@@ -184,6 +187,28 @@ app.whenReady().then(() => {
       .slice(0, 2000)
     return speakMath(cleaned)
   })
+
+  ipcMain.handle('voice:list', () => listVoices())
+  ipcMain.handle('voice:folder', () => join(root(), '.library', 'voices'))
+
+  ipcMain.handle(
+    'voice:speak',
+    async (_event, voiceId: unknown, text: unknown, shape: unknown, speed: unknown) => {
+      if (typeof voiceId !== 'string' || typeof text !== 'string' || !text.trim()) return null
+
+      const asked = shape && typeof shape === 'object' ? (shape as VoiceShape) : BOOK_VOICE
+      const result = await speakPiper(
+        voiceId,
+        text,
+        clampShape(asked),
+        typeof speed === 'number' && Number.isFinite(speed) ? Math.min(Math.max(speed, 0.5), 3) : 1
+      )
+      if (!result) return null
+      // Structured clone carries a typed array across intact, so the samples do
+      // not have to be copied into a plain array on the way.
+      return { pcm: result.pcm, sampleRate: result.sampleRate }
+    }
+  )
 
   ipcMain.handle('flags:get', () => loadFlags())
 

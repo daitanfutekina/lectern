@@ -18,6 +18,8 @@ import { typeset, configureMacros } from './mathjax'
 import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
 import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utterance } from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
+import { voiceFolder, voices as neuralVoices } from './neural-voice'
+import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { hasCover, renderHome, setCover } from './home'
 import { pdfCover, renderBook, type PdfView } from './pdf-view'
@@ -729,6 +731,44 @@ async function setUpPlayer(): Promise<void> {
   const select = el<HTMLSelectElement>('voice')
   if (!select) return
 
+  /*
+    Neural voices first, then the system ones.
+
+    A reader who has installed a Piper voice did so because the system voices
+    were not good enough, so putting those at the top of the list would be
+    showing them the thing they were trying to get away from.
+  */
+  const neural = await neuralVoices()
+  if (neural.length > 0) {
+    const group = document.createElement('optgroup')
+    group.label = 'Neural (Piper)'
+    for (const voice of neural) {
+      const option = document.createElement('option')
+      option.value = `piper:${voice.id}`
+      option.textContent = voice.name
+      group.append(option)
+    }
+    select.append(group)
+  }
+
+  // Shape controls only matter for a neural voice; the system ones expose
+  // nothing but a rate.
+  const shapeRow = el<HTMLElement>('shape-row')
+  if (shapeRow) shapeRow.hidden = neural.length === 0
+
+  const applyShape = (): void => {
+    const expressive = Number(el<HTMLInputElement>('expressive')?.value ?? '0.6')
+    const shape: VoiceShape = clampShape({
+      ...BOOK_VOICE,
+      noiseScale: expressive,
+      // Timing variation tracks expressiveness: a flat voice with loose timing
+      // sounds broken rather than calm.
+      noiseW: 0.4 + expressive * 0.5
+    })
+    reader.setShape(shape)
+  }
+  el<HTMLInputElement>('expressive')?.addEventListener('input', applyShape)
+
   const fill = (available: SpeechSynthesisVoice[]): void => {
     if (available.length === 0) return
     // English voices first: the library is in English, and a list led by voices
@@ -755,7 +795,30 @@ async function setUpPlayer(): Promise<void> {
     }
   }
 
-  select.addEventListener('change', () => reader.setVoice(select.value))
+  select.addEventListener('change', () => {
+    if (select.value.startsWith('piper:')) {
+      reader.setNeuralVoice(select.value.slice('piper:'.length))
+    } else {
+      reader.setNeuralVoice(null)
+      reader.setVoice(select.value)
+    }
+  })
+
+  if (neural.length > 0) {
+    // A reader who installed one wants it used.
+    const first = neural[0]
+    if (first) {
+      select.value = `piper:${first.id}`
+      reader.setNeuralVoice(first.id)
+    }
+  } else {
+    const folder = await voiceFolder()
+    const hint = el<HTMLElement>('voice-hint')
+    if (hint && folder) {
+      hint.textContent = `For a better voice, put a Piper model in ${folder}`
+      hint.hidden = false
+    }
+  }
 
   // Filled now if the voices are ready, and again if they arrive later. On
   // Windows they took several seconds, and a picker that gave up would stay

@@ -36,6 +36,7 @@
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
+    "sherpa-onnx-node": "^1.13.6",
     "speech-rule-engine": "^5.0.0-rc.4",
     "temml": "^0.13.4",
     "tesseract.js": "^7.0.0",
