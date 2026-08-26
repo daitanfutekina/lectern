@@ -107,7 +107,16 @@ export async function scanRange(
     // Vendored too. Without these, any page using a CID-keyed font renders its
     // glyphs as blanks -- and a blank page recognises as an empty one.
     cMapUrl: './cmaps/',
-    cMapPacked: true
+    cMapPacked: true,
+    /*
+      Vendored too, and all of them load-bearing. A book whose pages are JPEG
+      2000 images renders entirely white without the OpenJPEG decoder, and the
+      only sign of it is a console warning about `wasmUrl` -- which looks
+      nothing like "every page in this book is blank".
+    */
+    wasmUrl: './wasm/',
+    standardFontDataUrl: './standard_fonts/',
+    iccUrl: './iccs/'
   }).promise
   report(true)
 

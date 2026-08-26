@@ -84,6 +84,13 @@ const api = {
     exportIndex: (): Promise<string | null> => ipcRenderer.invoke('flags:export-index')
   },
 
+  /** Ctrl +, Ctrl - or Ctrl 0, forwarded so the document zooms instead of the window. */
+  onZoomKey: (listener: (direction: 'in' | 'out' | 'reset') => void): (() => void) => {
+    const handler = (_event: unknown, direction: 'in' | 'out' | 'reset'): void => listener(direction)
+    ipcRenderer.on('zoom:key', handler)
+    return () => ipcRenderer.removeListener('zoom:key', handler)
+  },
+
   /** A source file changed on disk; the open chapter should be re-read. */
   onLibraryChange: (listener: (file: string) => void): (() => void) => {
     const handler = (_event: unknown, file: string): void => listener(file)

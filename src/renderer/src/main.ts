@@ -20,7 +20,7 @@ import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utteranc
 import { Reader, onVoicesChanged, voices } from './speech'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { hasCover, renderHome, setCover } from './home'
-import { pdfCover, renderPages } from './pdf-view'
+import { pdfCover, renderBook, type PdfView } from './pdf-view'
 import { renderEpub } from './epub-view'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
 import { mathUtterance } from '@shared/math-gate'
@@ -51,6 +51,11 @@ let flagging: HTMLElement | null = null
  * 1 means "as wide as the window allows".
  */
 let pdfZoom = 1
+
+/** The open PDF, its book, and the text layers drawn so far. */
+let pdfView: PdfView | null = null
+let pdfBookId: string | null = null
+const pdfPages = new Map<number, HTMLElement>()
 
 /** One reader for the whole session; chapters are loaded into it. */
 const reader = new Reader()
@@ -266,6 +271,12 @@ function headingAbove(body: HTMLElement, position: ReadingPosition): string | nu
 async function open(bookId: string, file: string, at?: ReadingPosition): Promise<void> {
   // Two chapters recognising at once would fight over one CPU and both crawl.
   cancelScan()
+  if (pdfBookId !== bookId) {
+    pdfView?.destroy()
+    pdfView = null
+    pdfBookId = null
+    pdfPages.clear()
+  }
   const container = el<HTMLElement>('content')
   if (!container) return
 
@@ -419,27 +430,56 @@ async function openPdfChapter(
   chapter: Chapter
 ): Promise<void> {
   const range = /^p(\d+)-(\d+)$/.exec(chapter.file)
-  if (!range) return
+  const target = range ? Number(range[1]) : 1
 
-  const from = Number(range[1])
-  const to = Number(range[2])
+  // The whole document is one scroller, so opening a second "chapter" of a PDF
+  // already open is a jump rather than a reload -- which is the difference
+  // between a book and a stack of separate files.
+  if (pdfView && pdfBookId === book.id && container.querySelector('.pdf-pages')) {
+    pdfView.goToPage(target)
+    return
+  }
+
+  pdfView?.destroy()
+  pdfView = null
+  pdfPages.clear()
 
   const pages = element('div', 'pdf-pages')
   container.replaceChildren(pages)
   container.scrollTop = 0
 
-  await renderPages(pages, book.id, {
-    from,
-    to,
-    zoom: pdfZoom,
-    availableWidth: container.clientWidth
+  pdfBookId = book.id
+  pdfView = await renderBook(pages, container, book.id, pdfZoom, (page, textLayer) => {
+    // Speech grows with the document. A virtualised viewer has drawn only a
+    // handful of pages at any moment, so a queue built once would stop at
+    // whichever page happened to be on screen when it was built.
+    pdfPages.set(page, textLayer)
+    rebuildPdfQueue()
   })
 
-  // The text layer carries the words, so the ordinary walk finds them and
-  // word-follow lands on the page rather than on a copy of it.
-  const utterances = extract(pages)
-  reader.load(utterances, 0)
-  renderFlags()
+  if (pdfView && target > 1) pdfView.goToPage(target)
+}
+
+/**
+ * Rebuild the speech queue from the pages currently drawn, in page order.
+ *
+ * Debounced: pages arrive in bursts as the reader scrolls, and rebuilding for
+ * each one would reset the reader's position several times a second.
+ */
+let pdfQueueTimer: ReturnType<typeof setTimeout> | null = null
+
+function rebuildPdfQueue(): void {
+  if (pdfQueueTimer) clearTimeout(pdfQueueTimer)
+  pdfQueueTimer = setTimeout(() => {
+    pdfQueueTimer = null
+    const ordered = [...pdfPages.entries()].sort((a, b) => a[0] - b[0])
+    // The page wrapper, not the text layer: `extract` walks an element's
+    // children, so handing it the layer itself skipped the very check that
+    // recognises a layer and produced nothing at all.
+    const utterances = ordered.flatMap(([, layer]) => extract(layer.parentElement ?? layer))
+    const at = Math.min(reader.state.index, Math.max(0, utterances.length - 1))
+    reader.load(utterances, at)
+  }, 300)
 }
 
 /** An EPUB chapter, rendered in its own frame with its own styling. */
@@ -731,6 +771,10 @@ function showHome(): void {
   if (!container) return
 
   cancelScan()
+  pdfView?.destroy()
+  pdfView = null
+  pdfBookId = null
+  pdfPages.clear()
   reader.stop()
   current = null
 
@@ -879,8 +923,26 @@ function resumeTarget(): { bookId: string; file: string } | null {
 async function start(): Promise<void> {
   const container = el<HTMLElement>('content')
 
+  // Ctrl +/-/0 zoom the document being read, never the application.
+  window.lectern.onZoomKey((direction) => {
+    if (!pdfView) return
+    const current = pdfView.zoom()
+    const next = direction === 'reset' ? 1 : direction === 'in' ? current * 1.2 : current / 1.2
+    void pdfView.setZoom(next)
+  })
+
   el<HTMLButtonElement>('home')?.addEventListener('click', showHome)
   el<HTMLButtonElement>('rescan')?.addEventListener('click', () => void load(true).then(showHome))
+
+  const collapse = el<HTMLButtonElement>('collapse')
+  collapse?.addEventListener('click', () => {
+    const hidden = document.body.classList.toggle('is-collapsed')
+    collapse.textContent = hidden ? '›' : '‹'
+    collapse.title = hidden ? 'Show the sidebar' : 'Hide the sidebar'
+    // The PDF is fitted to the pane, so the pane changing width means the page
+    // has to be laid out again.
+    if (pdfView) void pdfView.setZoom(pdfView.zoom())
+  })
 
   // Writes INDEX.md: every book, chapter and heading in one file, so "have I
   // covered eigenvalues" can be answered by reading one thing rather than

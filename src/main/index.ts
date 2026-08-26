@@ -116,6 +116,32 @@ function createWindow(): BrowserWindow {
   if (verifying) window.webContents.setAudioMuted(true)
   else window.once('ready-to-show', () => window.show())
 
+  /*
+    The window itself never zooms.
+
+    Chromium's Ctrl+/- scales the whole interface, and it *persists per origin
+    in the session* -- so zooming out once left the application small on every
+    later launch with no obvious way back, because Ctrl+= is a different
+    keystroke from Ctrl+- and was never reaching it. Zoom belongs to the page
+    being read, not to the application around it.
+  */
+  window.webContents.setVisualZoomLevelLimits(1, 1)
+  window.webContents.on('did-finish-load', () => {
+    window.webContents.setZoomFactor(1)
+    window.webContents.setZoomLevel(0)
+  })
+
+  // Swallow the browser's own zoom keys and hand them to the renderer, which
+  // applies them to the document rather than to the window.
+  window.webContents.on('before-input-event', (event, input) => {
+    if (!input.control && !input.meta) return
+    const key = input.key
+    if (key === '+' || key === '=' || key === '-' || key === '_' || key === '0') {
+      event.preventDefault()
+      window.webContents.send('zoom:key', key === '0' ? 'reset' : key === '-' || key === '_' ? 'out' : 'in')
+    }
+  })
+
   // A link in a book opens in the real browser. Nothing navigates this window
   // away from the reader.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -418,6 +444,10 @@ LIVE-RELOAD-MARKER
     chapters: document.querySelectorAll('.chapter-link').length,
     bookTitles: [...document.querySelectorAll('.book-title')].map((b) => b.textContent).slice(0, 6),
     scanProgress: document.querySelector('#scan-progress')?.textContent || null,
+    pdfPages: document.querySelectorAll('.pdf-page').length,
+    pdfDrawn: document.querySelectorAll('.pdf-page canvas').length,
+    shelfCards: document.querySelectorAll('.shelf-card').length,
+    shelfIds: [...document.querySelectorAll('.shelf-card')].map((c) => c.dataset.book).slice(0, 6),
     flagCount: document.querySelectorAll('.flag').length,
     sidebarScrolls: (() => {
       const el = document.querySelector('#sidebar');

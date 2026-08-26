@@ -173,7 +173,9 @@ async function scanAddedDocuments(): Promise<Book[]> {
   const entries = await livingDocuments()
   const books = await Promise.all(
     entries.map(async (entry) => {
-      const name = entry.path.split(/[\/]/).pop() ?? entry.path
+      // Both separators: a Windows path split on `/` alone comes back whole,
+      // and the book's id then carries its entire absolute path.
+      const name = entry.path.split(/[\\/]/).pop() ?? entry.path
       const format: DocumentFormat = name.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf'
       try {
         return await readFileBook(entry.path.slice(0, entry.path.length - name.length), name, format)

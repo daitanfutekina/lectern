@@ -1017,15 +1017,19 @@ body.is-home #flag-bar {
 }
 
 /*
-  pdf.js's text layer, over the canvas and invisible. It is what makes text
-  selectable on a rendered page, and what gives word-follow something real to
-  highlight on a page made of pixels.
+  pdf.js's text layer, over the canvas. It is what makes text selectable on a
+  rendered page, and what gives word-follow something real to highlight on a
+  page made of pixels.
+
+  The layer itself is fully opaque and its *glyphs* are transparent. Making the
+  whole layer nearly transparent instead -- which is the older pdf.js recipe --
+  hides the selection and the spoken-word highlight along with the text, so the
+  highlight was being drawn correctly and was invisible.
 */
 .pdf-text-layer {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  opacity: 0.01;
   line-height: 1;
   text-align: initial;
   transform-origin: 0 0;
@@ -1042,6 +1046,13 @@ body.is-home #flag-bar {
 
 .pdf-text-layer ::selection {
   background: rgb(88 166 255 / 0.4);
+}
+
+/* Over a white page, the spoken word needs a stronger mark than over prose. */
+.pdf-text-layer::highlight(spoken),
+.pdf-page ::highlight(spoken) {
+  background: rgb(255 200 0 / 0.45);
+  color: transparent;
 }
 
 /* ── EPUB frame ────────────────────────────────────────────────────── */
@@ -1083,4 +1094,49 @@ body.is-home #flag-bar {
   border-radius: 12px;
   color: var(--accent-2);
   font-size: 17px;
+}
+
+
+/* ── Collapsing the sidebar ────────────────────────────────────────── */
+
+#collapse {
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+#collapse:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/*
+  Collapsed to a strip holding only the control that brings it back. Hiding it
+  entirely would leave no way to reopen it without a menu.
+*/
+body.is-collapsed #app {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+body.is-collapsed #sidebar-head {
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 6px;
+}
+
+body.is-collapsed #sidebar-head h1,
+body.is-collapsed #rescan,
+body.is-collapsed #export-index,
+body.is-collapsed #home,
+body.is-collapsed #books,
+body.is-collapsed #flags,
+body.is-collapsed #bookmarks,
+body.is-collapsed #library-meta {
+  display: none;
 }

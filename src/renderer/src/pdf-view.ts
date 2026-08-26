@@ -1,15 +1,16 @@
 /**
  * Showing a PDF as a PDF. SPEC section 3, as amended.
  *
- * The first version of this extracted the text and rendered it in the
- * application's own theme, which threw away the thing the reader asked for. A
- * PDF is a laid-out page: its figures, its equations, its margins are the
- * document. Reading a PDF means seeing it.
+ * The whole document is one continuous scroller. Reading a book should not mean
+ * clicking through it a chapter at a time -- the outline is for jumping to a
+ * place, not for cutting the book into pieces that have to be opened
+ * separately.
  *
- * Pages are drawn to canvases, and pdf.js's own text layer is placed over each
- * one -- invisible, positioned to match the glyphs. That is what gives
- * selection, and it is also what lets word-follow highlight a spoken word on a
- * page made of pixels.
+ * Pages are **virtualised**: every page gets a correctly-sized placeholder
+ * immediately, so the scrollbar tells the truth from the first frame, and only
+ * pages near the viewport are actually drawn. A 948-page textbook cannot be
+ * rasterised in one go, and the first attempt at this rendered a chapter's
+ * worth of pages in a loop and showed nothing at all until it finished.
  */
 
 interface PdfDocumentLike {
@@ -21,6 +22,7 @@ interface PdfPageLike {
   getViewport: (options: { scale: number }) => Viewport
   render: (options: { canvasContext: CanvasRenderingContext2D; viewport: Viewport }) => {
     promise: Promise<void>
+    cancel?: () => void
   }
   getTextContent: () => Promise<{ items: unknown[] }>
 }
@@ -67,7 +69,16 @@ export async function openDocument(bookId: string): Promise<PdfDocumentLike | nu
   const document = await lib.getDocument({
     data: new Uint8Array(bytes),
     cMapUrl: './cmaps/',
-    cMapPacked: true
+    cMapPacked: true,
+    /*
+      Vendored too, and all of them load-bearing. A book whose pages are JPEG
+      2000 images renders entirely white without the OpenJPEG decoder, and the
+      only sign of it is a console warning about `wasmUrl` -- which looks
+      nothing like "every page in this book is blank".
+    */
+    wasmUrl: './wasm/',
+    standardFontDataUrl: './standard_fonts/',
+    iccUrl: './iccs/'
   }).promise
 
   documents.set(bookId, document)
@@ -100,94 +111,194 @@ export async function pdfCover(bookId: string, height = 320): Promise<string | n
   }
 }
 
-export interface PdfViewOptions {
-  readonly from: number
-  readonly to: number
-  /** Multiplier applied on top of the fit-to-width scale. */
-  readonly zoom: number
-  /** Pixels available to the page, so it can be fitted to them. */
-  readonly availableWidth: number
-}
-
 /** Margin left around a page, so it does not touch the edges of the pane. */
 const PAGE_MARGIN = 48
 
 /**
- * The scale that fits a page to the pane.
+ * How far outside the viewport pages are kept drawn.
  *
- * A fixed zoom cannot work: page sizes vary, panes are resizable, and a fixed
- * 1.35 made a US Letter page wider than the window and cut the right-hand
- * margin off every line. Fitting to width is what a PDF reader does, and the
- * zoom multiplier then means what a reader expects it to mean.
+ * Generous enough that scrolling never shows a blank page, small enough that a
+ * long book holds a few dozen canvases rather than nine hundred.
  */
-function fitScale(pageWidth: number, available: number, zoom: number): number {
-  const usable = Math.max(available - PAGE_MARGIN, 240)
-  return Math.max((usable / pageWidth) * zoom, 0.1)
+const RENDER_MARGIN = '150% 0px'
+
+/** Beyond this many drawn pages, the ones furthest from view are released. */
+const MAX_DRAWN = 24
+
+export interface PdfView {
+  /** Scroll a page into view. Used by the outline. */
+  goToPage: (page: number) => void
+  /** Redraw at a new scale, keeping the reader where they were. */
+  setZoom: (zoom: number) => Promise<void>
+  zoom: () => number
+  destroy: () => void
 }
 
+type OnPageRendered = (page: number, textLayer: HTMLElement) => void
+
 /**
- * Render a page range into a container.
+ * Render the whole document into `container` as a continuous scroller.
  *
- * Pages are drawn one at a time and appended as they finish, so a fifty-page
- * chapter shows its first page immediately rather than nothing for ten seconds.
+ * `onPageRendered` fires as each page's text arrives, so the speech queue can
+ * grow with the document rather than being built once from whatever happened to
+ * be drawn at the time.
  */
-export async function renderPages(
+export async function renderBook(
   container: HTMLElement,
+  scroller: HTMLElement,
   bookId: string,
-  options: PdfViewOptions,
-  onProgress?: (done: number, total: number) => void
-): Promise<void> {
+  initialZoom: number,
+  onPageRendered: OnPageRendered
+): Promise<PdfView | null> {
   const document = await openDocument(bookId)
   const lib = await pdfjs()
   if (!document) {
     container.textContent = 'This PDF could not be opened.'
-    return
+    return null
   }
 
-  container.replaceChildren()
-  const total = options.to - options.from + 1
-  let done = 0
+  let zoom = initialZoom
+  let scale = 1
+  const wrappers: HTMLElement[] = []
+  const drawn = new Set<number>()
+  const drawing = new Set<number>()
 
-  for (let number = options.from; number <= options.to; number += 1) {
-    // The container was replaced by another chapter while this was running.
-    if (!container.isConnected) return
+  // Page one decides the placeholder size for the rest. Documents with mixed
+  // page sizes correct themselves as each page is actually drawn.
+  const first = await document.getPage(1)
+  const natural = first.getViewport({ scale: 1 })
 
-    const page = await document.getPage(number)
-    const natural = page.getViewport({ scale: 1 })
-    const viewport = page.getViewport({
-      scale: fitScale(natural.width, options.availableWidth, options.zoom)
-    })
+  const computeScale = (): number => {
+    const usable = Math.max(scroller.clientWidth - PAGE_MARGIN, 240)
+    return Math.max((usable / natural.width) * zoom, 0.1)
+  }
 
-    const wrapper = window.document.createElement('div')
-    wrapper.className = 'pdf-page'
-    wrapper.dataset['page'] = String(number)
-    wrapper.style.width = `${Math.ceil(viewport.width)}px`
-    wrapper.style.height = `${Math.ceil(viewport.height)}px`
+  const build = (): void => {
+    scale = computeScale()
+    const width = Math.ceil(natural.width * scale)
+    const height = Math.ceil(natural.height * scale)
 
-    const canvas = window.document.createElement('canvas')
-    // Drawn at device resolution and displayed at CSS resolution, or the page
-    // is soft on any screen that is not exactly 1x.
-    const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.ceil(viewport.width * ratio)
-    canvas.height = Math.ceil(viewport.height * ratio)
-    canvas.style.width = `${Math.ceil(viewport.width)}px`
-    canvas.style.height = `${Math.ceil(viewport.height)}px`
+    container.replaceChildren()
+    wrappers.length = 0
+    drawn.clear()
 
-    const context = canvas.getContext('2d')
-    if (context) {
-      context.scale(ratio, ratio)
-      await page.render({ canvasContext: context, viewport }).promise
+    for (let number = 1; number <= document.numPages; number += 1) {
+      const wrapper = window.document.createElement('div')
+      wrapper.className = 'pdf-page'
+      wrapper.dataset['page'] = String(number)
+      wrapper.style.width = `${width}px`
+      wrapper.style.height = `${height}px`
+      wrappers.push(wrapper)
+      container.append(wrapper)
     }
-    wrapper.append(canvas)
+  }
 
-    const textLayer = window.document.createElement('div')
-    textLayer.className = 'pdf-text-layer'
-    wrapper.append(textLayer)
-    await addTextLayer(lib, page, viewport, textLayer)
+  build()
 
-    container.append(wrapper)
-    done += 1
-    onProgress?.(done, total)
+  const draw = async (number: number): Promise<void> => {
+    const wrapper = wrappers[number - 1]
+    if (!wrapper || drawn.has(number) || drawing.has(number)) return
+    drawing.add(number)
+
+    try {
+      const page = await document.getPage(number)
+      const viewport = page.getViewport({ scale })
+
+      // The placeholder was sized from page one; correct it now that the real
+      // page is known, or a document of mixed page sizes drifts as it scrolls.
+      wrapper.style.width = `${Math.ceil(viewport.width)}px`
+      wrapper.style.height = `${Math.ceil(viewport.height)}px`
+
+      const canvas = window.document.createElement('canvas')
+      const ratio = window.devicePixelRatio || 1
+      canvas.width = Math.ceil(viewport.width * ratio)
+      canvas.height = Math.ceil(viewport.height * ratio)
+      canvas.style.width = `${Math.ceil(viewport.width)}px`
+      canvas.style.height = `${Math.ceil(viewport.height)}px`
+
+      const context = canvas.getContext('2d')
+      if (context) {
+        context.scale(ratio, ratio)
+        await page.render({ canvasContext: context, viewport }).promise
+      }
+
+      // The reader scrolled away, or the zoom changed, while this was drawing.
+      if (!wrapper.isConnected) return
+
+      const textLayer = window.document.createElement('div')
+      textLayer.className = 'pdf-text-layer'
+      wrapper.replaceChildren(canvas, textLayer)
+      await addTextLayer(lib, page, viewport, textLayer)
+
+      drawn.add(number)
+      release()
+      onPageRendered(number, textLayer)
+    } catch {
+      // One page failing is not a reason to lose the document.
+    } finally {
+      drawing.delete(number)
+    }
+  }
+
+  /** Free canvases far from the viewport, so a long book stays bounded. */
+  const release = (): void => {
+    if (drawn.size <= MAX_DRAWN) return
+    const middle = currentPage()
+    const ordered = [...drawn].sort((a, b) => Math.abs(b - middle) - Math.abs(a - middle))
+
+    for (const number of ordered) {
+      if (drawn.size <= MAX_DRAWN) break
+      const wrapper = wrappers[number - 1]
+      if (!wrapper) continue
+      // The size is kept, so releasing a page does not move everything below it.
+      wrapper.replaceChildren()
+      drawn.delete(number)
+    }
+  }
+
+  const currentPage = (): number => {
+    const middle = scroller.scrollTop + scroller.clientHeight / 2
+    for (const [at, wrapper] of wrappers.entries()) {
+      if (wrapper.offsetTop + wrapper.offsetHeight >= middle) return at + 1
+    }
+    return 1
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        const number = Number((entry.target as HTMLElement).dataset['page'])
+        if (Number.isInteger(number)) void draw(number)
+      }
+    },
+    { root: scroller, rootMargin: RENDER_MARGIN }
+  )
+
+  const observeAll = (): void => {
+    for (const wrapper of wrappers) observer.observe(wrapper)
+  }
+  observeAll()
+
+  return {
+    goToPage: (page: number) => {
+      const wrapper = wrappers[Math.max(0, Math.min(page, wrappers.length) - 1)]
+      if (wrapper) scroller.scrollTo({ top: wrapper.offsetTop - 12, behavior: 'smooth' })
+    },
+    setZoom: async (next: number) => {
+      // Keep the reader on the page they were looking at rather than at the
+      // same pixel offset, which means nothing once everything has resized.
+      const anchor = currentPage()
+      zoom = Math.max(0.4, Math.min(next, 4))
+      observer.disconnect()
+      build()
+      observeAll()
+      const wrapper = wrappers[anchor - 1]
+      if (wrapper) scroller.scrollTop = wrapper.offsetTop - 12
+      await draw(anchor)
+    },
+    zoom: () => zoom,
+    destroy: () => observer.disconnect()
   }
 }
 
