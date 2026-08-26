@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { LibraryIndex } from '@shared/library'
 import type { Bookmark, ChapterProgress, LibraryProgress, ReadingPosition } from '@shared/progress'
+import type { Flag, FlagStore } from '@shared/flags'
 
 /**
  * The bridge. SPEC section 10.
@@ -47,6 +48,24 @@ const api = {
     /** Register a book's macros before converting any of its equations. */
     configure: (macros: Readonly<Record<string, string>>): Promise<void> =>
       ipcRenderer.invoke('math:configure', macros)
+  },
+
+  flags: {
+    /** Every flagged passage in the library. */
+    get: (): Promise<FlagStore> => ipcRenderer.invoke('flags:get'),
+    /** Record a passage. Also rewrites FLAGGED.md, the handoff document. */
+    add: (flag: Omit<Flag, 'id' | 'createdAt'>): Promise<FlagStore> =>
+      ipcRenderer.invoke('flags:add', flag),
+    remove: (id: string): Promise<FlagStore> => ipcRenderer.invoke('flags:remove', id),
+    /** Write INDEX.md: the whole library's chapters and headings, in one file. */
+    exportIndex: (): Promise<string | null> => ipcRenderer.invoke('flags:export-index')
+  },
+
+  /** A source file changed on disk; the open chapter should be re-read. */
+  onLibraryChange: (listener: (file: string) => void): (() => void) => {
+    const handler = (_event: unknown, file: string): void => listener(file)
+    ipcRenderer.on('library:changed', handler)
+    return () => ipcRenderer.removeListener('library:changed', handler)
   },
 
   scan: {

@@ -19,6 +19,7 @@ import { blockCount, currentPosition, restorePosition, trackPosition } from './p
 import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utterance } from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
+import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
 import { mathUtterance } from '@shared/math-gate'
 
 /**
@@ -37,6 +38,10 @@ let current: { bookId: string; file: string } | null = null
  * over the position we are in the middle of returning to.
  */
 let restoring = false
+
+/** Flags in the library, and the paragraph currently being flagged. */
+let flags: readonly Flag[] = []
+let flagging: HTMLElement | null = null
 
 /** One reader for the whole session; chapters are loaded into it. */
 const reader = new Reader()
@@ -303,6 +308,10 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   // Equations are converted after the queue exists and after the chapter is on
   // screen. It is a slow batch, and making the reader wait for it would trade
   // a feature they may not use for a delay they certainly notice.
+  // Both, and both matter: the panel lists this book's flags, and the marks
+  // show which paragraphs on screen carry one.
+  renderFlags()
+  markFlagged()
   void fillMathSpeech(book, utterances, rendered)
 
   // A scan has no text yet. Recognition runs in the background and rebuilds the
@@ -363,6 +372,143 @@ async function fillMathSpeech(
   const resumeAt = reader.state.index
   const rebuilt = withMathSpeech(extract(body), displaySpeech)
   reader.load(rebuilt, Math.min(resumeAt, Math.max(0, rebuilt.length - 1)))
+}
+
+/* ── Flagging a passage ──────────────────────────────────────────────── */
+
+/**
+ * The nearest heading above a paragraph.
+ *
+ * Context for a passage whose text alone is ambiguous -- and in a textbook,
+ * "This follows from the previous result" appears on many pages.
+ */
+function headingFor(element: HTMLElement): string | null {
+  let node: Element | null = element
+  while (node) {
+    if (/^H[1-6]$/.test(node.tagName) || node.classList.contains('box-label')) {
+      return node.textContent?.trim() ?? null
+    }
+    node = node.previousElementSibling ?? node.parentElement
+    if (node?.classList.contains('chapter-body')) break
+  }
+  return null
+}
+
+function openFlagBar(paragraph: HTMLElement): void {
+  flagging?.classList.remove('is-flagging')
+  flagging = paragraph
+  paragraph.classList.add('is-flagging')
+
+  el<HTMLElement>('flag-bar')?.classList.add('is-open')
+  const target = el<HTMLElement>('flag-target')
+  if (target) target.textContent = excerpt(paragraph.textContent ?? '', 90)
+  const note = el<HTMLInputElement>('flag-note')
+  if (note) note.value = ''
+}
+
+function closeFlagBar(): void {
+  flagging?.classList.remove('is-flagging')
+  flagging = null
+  el<HTMLElement>('flag-bar')?.classList.remove('is-open')
+}
+
+async function recordFlag(kind: FlagKind): Promise<void> {
+  const paragraph = flagging
+  if (!paragraph || !current) return
+
+  const body = chapterBody()
+  const blocks = body ? Array.from(body.children) : []
+
+  const store = await window.lectern.flags.add({
+    book: current.bookId,
+    chapter: current.file,
+    kind,
+    // The passage itself, because a block index breaks the moment the chapter
+    // is edited -- and the edit is what the flag was asking for.
+    text: paragraph.textContent ?? '',
+    heading: headingFor(paragraph),
+    block: Math.max(0, blocks.indexOf(paragraph.closest('.chapter-body > *') ?? paragraph)),
+    note: el<HTMLInputElement>('flag-note')?.value ?? ''
+  })
+
+  flags = store.flags
+  paragraph.classList.add('is-flagged')
+  closeFlagBar()
+  renderFlags()
+}
+
+function renderFlags(): void {
+  const panel = el<HTMLElement>('flags')
+  if (!panel) return
+  panel.replaceChildren()
+
+  const mine = flags.filter((flag) => flag.book === current?.bookId)
+  if (mine.length === 0) return
+
+  panel.append(element('div', 'book-title', `Flagged (${mine.length})`))
+
+  for (const flag of [...mine].sort((a, b) => b.createdAt - a.createdAt)) {
+    const row = element('div', 'flag')
+
+    const jump = element('button', 'flag-jump')
+    jump.type = 'button'
+    jump.append(element('span', `flag-kind kind-${flag.kind}`, FLAG_LABELS[flag.kind]))
+    jump.append(element('span', 'flag-text', excerpt(flag.text, 70)))
+    jump.addEventListener('click', () => void open(flag.book, flag.chapter))
+
+    const remove = element('button', 'flag-remove', '×')
+    remove.type = 'button'
+    remove.title = 'Remove flag'
+    remove.addEventListener('click', () => {
+      void window.lectern.flags.remove(flag.id).then((store) => {
+        flags = store.flags
+        renderFlags()
+        markFlagged()
+      })
+    })
+
+    row.append(jump, remove)
+    panel.append(row)
+  }
+}
+
+/** Mark paragraphs that already carry a flag, so a reread shows what was said. */
+function markFlagged(): void {
+  const body = chapterBody()
+  if (!body || !current) return
+
+  const texts = new Set(
+    flags
+      .filter((flag) => flag.book === current?.bookId && flag.chapter === current?.file)
+      .map((flag) => flag.text.replace(/\s+/g, ' ').trim())
+  )
+
+  for (const paragraph of Array.from(body.querySelectorAll<HTMLElement>('p, li'))) {
+    const text = (paragraph.textContent ?? '').replace(/\s+/g, ' ').trim()
+    paragraph.classList.toggle('is-flagged', texts.has(text))
+  }
+}
+
+function setUpFlagging(): void {
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-flag]'))) {
+    button.addEventListener('click', () => void recordFlag(button.dataset['flag'] as FlagKind))
+  }
+  el<HTMLButtonElement>('flag-cancel')?.addEventListener('click', closeFlagBar)
+
+  // Right-click a paragraph to flag it. The passage is flagged where it is
+  // read: asking the reader to remember it, find a form and describe it is
+  // enough friction that the signal never gets recorded at all.
+  el<HTMLElement>('content')?.addEventListener('contextmenu', (event) => {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    const paragraph = target.closest<HTMLElement>('.chapter-body p, .chapter-body li')
+    if (!paragraph) return
+    // Furniture is not content. A page marker is excluded from speech for the
+    // same reason it is excluded here: there is nothing in it to be confused by.
+    if (paragraph.dataset['speak'] === 'no' || paragraph.classList.contains('notice')) return
+    event.preventDefault()
+    openFlagBar(paragraph)
+  })
 }
 
 /* ── Scanned pages ───────────────────────────────────────────────────── */
@@ -511,6 +657,20 @@ async function start(): Promise<void> {
 
   el<HTMLButtonElement>('rescan')?.addEventListener('click', () => void load(true))
 
+  // Writes INDEX.md: every book, chapter and heading in one file, so "have I
+  // covered eigenvalues" can be answered by reading one thing rather than
+  // walking 220.
+  el<HTMLButtonElement>('export-index')?.addEventListener('click', () => {
+    const button = el<HTMLButtonElement>('export-index')
+    void window.lectern.flags.exportIndex().then((path) => {
+      if (!button) return
+      button.textContent = path ? 'Written' : 'Failed'
+      setTimeout(() => {
+        button.textContent = 'Index'
+      }, 2000)
+    })
+  })
+
   document.addEventListener('keydown', (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
     if (!current) return
@@ -532,6 +692,11 @@ async function start(): Promise<void> {
 
     // Space is the universal play/pause, but only when the reader is not on a
     // control that uses it -- a focused button would otherwise be pressed too.
+    if (event.key === 'Escape') {
+      closeFlagBar()
+      return
+    }
+
     if (event.key === ' ' && !(event.target instanceof HTMLButtonElement)) {
       event.preventDefault()
       reader.toggle()
@@ -580,7 +745,26 @@ async function start(): Promise<void> {
   ])
   renderSidebar()
 
+  setUpFlagging()
   await setUpPlayer()
+
+  flags = (await window.lectern.flags.get()).flags
+  renderFlags()
+
+  /*
+    A source file changed on disk. Re-reading the open chapter is what closes
+    the loop between flagging a passage here and fixing it in Claude Code: the
+    alternative is quit, rebuild, reopen, find your place again, which is enough
+    friction that the loop stops being used.
+  */
+  window.lectern.onLibraryChange(() => {
+    if (!current) return
+    const container = el<HTMLElement>('content')
+    const at = container && chapterBody() ? currentPosition(container, chapterBody()!) : undefined
+    void load().then(() => {
+      if (current) void open(current.bookId, current.file, at)
+    })
+  })
 
   const target = resumeTarget()
   if (target) void open(target.bookId, target.file)

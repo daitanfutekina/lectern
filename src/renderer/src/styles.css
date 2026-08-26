@@ -84,7 +84,8 @@ body {
   letter-spacing: 0.02em;
 }
 
-#rescan {
+#rescan,
+#export-index {
   padding: 5px 11px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -95,7 +96,8 @@ body {
   cursor: pointer;
 }
 
-#rescan:hover {
+#rescan:hover,
+#export-index:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -686,4 +688,146 @@ details.box[open] > summary::before {
 
 #scan-progress[hidden] {
   display: none;
+}
+
+/* ── Flagging a passage ────────────────────────────────────────────── */
+
+/*
+  A paragraph is flaggable where it is read. Asking the reader to remember a
+  passage, open a form and describe it is enough friction that the signal never
+  gets recorded -- which is the problem this exists to solve.
+*/
+.chapter-body p:hover,
+.chapter-body li:hover {
+  box-shadow: -12px 0 0 -10px var(--border);
+}
+
+.chapter-body .is-flagging {
+  box-shadow: -12px 0 0 -10px var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.chapter-body .is-flagged {
+  box-shadow: -12px 0 0 -10px var(--warn);
+}
+
+#flag-bar {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 24px;
+  border-top: 1px solid var(--accent);
+  background: var(--bg-callout);
+}
+
+#flag-bar.is-open {
+  display: flex;
+}
+
+#flag-target {
+  flex: 1 1 220px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#flag-bar button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#flag-bar button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#flag-note {
+  flex: 1 1 200px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+#flags {
+  max-height: 30vh;
+  overflow-y: auto;
+  /*
+    Hidden explicitly. The excerpts are single-line and elided, but a flex item
+    will not shrink below its content unless told to, and the overflow turned
+    into a scrollbar across the whole sidebar.
+  */
+  overflow-x: hidden;
+  padding: 0 10px 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.flag {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.flag:hover {
+  background: var(--bg-callout);
+}
+
+.flag-jump {
+  flex: 1;
+  /* Lets the elided text actually shrink; flex items default to min-width: auto. */
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flag-kind {
+  display: block;
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flag-kind.kind-good {
+  color: var(--success);
+}
+
+.flag-text {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flag-remove {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.flag-remove:hover {
+  color: var(--danger);
 }

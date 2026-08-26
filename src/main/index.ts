@@ -5,6 +5,9 @@ import { DEFAULT_ROOT, readChapterSource, saveIndex, scanLibrary } from './libra
 import { configureMath, speakMath } from './math-speech'
 import { pdfBytes } from './pdf'
 import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
+import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
+import { watchLibrary } from './watch'
+import { flagId, type Flag, type FlagKind } from '@shared/flags'
 import {
   addBookmark,
   flushProgress,
@@ -123,6 +126,7 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   app.setAppUserModelId('com.lectern.app')
   configureOcrCache(root())
+  configureFlags(root())
   serveRenderer()
 
   ipcMain.handle('library:get', () => library())
@@ -144,6 +148,38 @@ app.whenReady().then(() => {
       .slice(0, 2000)
     return speakMath(cleaned)
   })
+
+  ipcMain.handle('flags:get', () => loadFlags())
+
+  ipcMain.handle('flags:add', async (_event, input: unknown) => {
+    if (typeof input !== 'object' || input === null) return loadFlags()
+    const candidate = input as Record<string, unknown>
+    const text = typeof candidate['text'] === 'string' ? candidate['text'].trim() : ''
+    // Without the passage there is nothing to find later, so there is nothing
+    // worth storing.
+    if (!text) return loadFlags()
+
+    const now = Date.now()
+    const flag: Flag = {
+      id: flagId(now, Math.random()),
+      book: typeof candidate['book'] === 'string' ? candidate['book'] : '',
+      chapter: typeof candidate['chapter'] === 'string' ? candidate['chapter'] : '',
+      kind: (typeof candidate['kind'] === 'string' ? candidate['kind'] : 'confusing') as FlagKind,
+      text: text.slice(0, 4000),
+      heading: typeof candidate['heading'] === 'string' ? candidate['heading'] : null,
+      block: typeof candidate['block'] === 'number' ? candidate['block'] : 0,
+      note: typeof candidate['note'] === 'string' ? candidate['note'].slice(0, 1000) : '',
+      createdAt: now
+    }
+    return addFlag(flag, await library())
+  })
+
+  ipcMain.handle('flags:remove', async (_event, id: unknown) => {
+    if (typeof id !== 'string') return loadFlags()
+    return removeFlag(id, await library())
+  })
+
+  ipcMain.handle('flags:export-index', async () => exportIndex(await library()))
 
   ipcMain.handle('scan:bytes', async (_event, bookId: unknown) => {
     if (typeof bookId !== 'string') return null
@@ -220,6 +256,12 @@ app.whenReady().then(() => {
 
   const window = createWindow()
 
+  // Editing a chapter in Claude Code and seeing it in the reader is the loop
+  // M7 exists to close, so the reader is told rather than having to be told.
+  watchLibrary(root(), (file) => {
+    if (!window.isDestroyed()) window.webContents.send('library:changed', file)
+  })
+
   // Verification hook. "Does a chapter actually render" is the only question
   // that matters at the end of each milestone, and it cannot be answered from a
   // unit test or from the build succeeding. Set LECTERN_CAPTURE to a path and
@@ -287,6 +329,57 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     })
   }
 
+  // Flagging is a right-click, which no click hook can reach. This dispatches a
+  // real contextmenu event at a selector so the whole path -- open the bar,
+  // choose a kind, write the file -- is exercised rather than simulated.
+  const flagAt = process.env['LECTERN_FLAG']
+  if (flagAt) {
+    const [selector = '', kind = 'confusing'] = flagAt.split('|')
+    await window.webContents.executeJavaScript(`
+      (() => {
+        const target = document.querySelector(${JSON.stringify(selector)});
+        if (!target) return 'no target';
+        target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+        const note = document.querySelector('#flag-note');
+        if (note) note.value = 'Flagged by a verification run.';
+        document.querySelector('[data-flag=' + JSON.stringify(${JSON.stringify(kind)}) + ']')?.click();
+        return 'ok';
+      })()
+    `)
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), 1500)
+    })
+  }
+
+
+  /*
+    Live reload cannot be verified in one shot: it needs the file to change
+    while the application is watching. This edits a real chapter, waits for the
+    watcher, then puts it back -- so the whole path is exercised against the
+    real filesystem rather than a simulated event.
+  */
+  const touch = process.env['LECTERN_TOUCH']
+  if (touch) {
+    const { readFile, writeFile } = await import('node:fs/promises')
+    const original = await readFile(touch, 'utf8')
+    try {
+      await writeFile(touch, `${original}
+
+LIVE-RELOAD-MARKER
+`, 'utf8')
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), 4000)
+      })
+      const seen = await window.webContents.executeJavaScript(
+        `(document.querySelector('#content')?.innerText ?? '').includes('LIVE-RELOAD-MARKER')`
+      )
+      process.stdout.write(`RELOAD ${seen ? 'seen' : 'not seen'}
+`)
+    } finally {
+      await writeFile(touch, original, 'utf8')
+    }
+  }
+
   const image = await window.webContents.capturePage()
   await writeFile(path, image.toPNG())
 
@@ -294,6 +387,12 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     chapters: document.querySelectorAll('.chapter-link').length,
     bookTitles: [...document.querySelectorAll('.book-title')].map((b) => b.textContent).slice(0, 6),
     scanProgress: document.querySelector('#scan-progress')?.textContent || null,
+    flagCount: document.querySelectorAll('.flag').length,
+    sidebarScrolls: (() => {
+      const el = document.querySelector('#sidebar');
+      return el ? el.scrollWidth > el.clientWidth + 1 : null;
+    })(),
+    flagBarOpen: document.querySelector('#flag-bar')?.classList.contains('is-open') ?? false,
 
     typesetMath: document.querySelectorAll('mjx-container').length,
     boxes: document.querySelectorAll('.box').length,

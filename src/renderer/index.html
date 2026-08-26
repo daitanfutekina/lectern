@@ -27,9 +27,11 @@
       <aside id="sidebar">
         <header id="sidebar-head">
           <h1>Lectern</h1>
+          <button id="export-index" type="button" title="Write INDEX.md for the whole library">Index</button>
           <button id="rescan" type="button" title="Re-scan the library">Rescan</button>
         </header>
         <nav id="books"></nav>
+        <div id="flags"></div>
         <section id="bookmarks"></section>
         <footer id="library-meta"></footer>
       </aside>
@@ -56,6 +58,15 @@
           <select id="voice" title="Voice"></select>
         </div>
         <nav id="chapter-nav"></nav>
+        <div id="flag-bar">
+          <span id="flag-target"></span>
+          <button data-flag="confusing" type="button">Confusing</button>
+          <button data-flag="wrong" type="button">Looks wrong</button>
+          <button data-flag="thin" type="button">Too thin</button>
+          <button data-flag="good" type="button">Worked well</button>
+          <input id="flag-note" type="text" placeholder="Note (optional)" />
+          <button id="flag-cancel" type="button">Cancel</button>
+        </div>
       </main>
     </div>
 

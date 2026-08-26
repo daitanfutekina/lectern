@@ -13,10 +13,21 @@ Everything is free and offline. No paid service, no account, no network.
 - [x] **M4** — Mathematics speech and the complexity gate
 - [x] **M5** — Digital PDF and EPUB adapters
 - [x] **M6** — OCR pipeline and background queue
-- [ ] **M7** — Flagged passages and index export
+- [x] **M7** — Flagged passages and index export
 
-Each milestone has an explicit *done when* in [docs/SPEC.md](docs/SPEC.md)
-section 11.
+All seven are done, each against the explicit *done when* in
+[docs/SPEC.md](docs/SPEC.md) section 11.
+
+## The handoff
+
+Right-click a paragraph while reading to flag it. That writes `FLAGGED.md` at
+the library root -- grouped by chapter, quoting each passage as it read at the
+time, so it can be found by searching the source even after the chapter has
+been edited. Editing a source file re-renders it in the reader within a second,
+which is what makes the loop worth using.
+
+The `Index` button writes `INDEX.md`: every book, chapter and heading in one
+file, so what the library already covers can be read without opening any of it.
 
 ## Commands
 
