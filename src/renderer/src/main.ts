@@ -16,8 +16,9 @@ import {
 import type { Book, Chapter, LibraryIndex } from '@shared/library'
 import { typeset, configureMacros } from './mathjax'
 import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
-import { extract } from './blocks'
+import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utterance } from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
+import { mathUtterance } from '@shared/math-gate'
 
 /**
  * The reading surface. SPEC section 10: no Node access, no filesystem, no
@@ -287,8 +288,64 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   const nearest = rendered.children[Math.max(0, blockAt)]
   reader.load(utterances, nearest instanceof HTMLElement ? reader.indexNear(nearest) : 0)
 
+  // Equations are converted after the queue exists and after the chapter is on
+  // screen. It is a slow batch, and making the reader wait for it would trade
+  // a feature they may not use for a delay they certainly notice.
+  void fillMathSpeech(book, utterances, rendered)
+
   void window.lectern.progress.open(bookId, file)
   restoring = false
+}
+
+/**
+ * Generate speech for the chapter's equations and reload the queue with them.
+ *
+ * The whole chapter goes over in one call. Hundreds of equations at one round
+ * trip each would be hundreds of round trips, and the conversion caches on the
+ * other side so a chapter revisited costs nothing.
+ */
+async function fillMathSpeech(
+  book: Book,
+  utterances: Utterance[],
+  body: HTMLElement
+): Promise<void> {
+  const equations = collectMath(body)
+  if (equations.length === 0) return
+
+  await window.lectern.math.configure(book.macros)
+  const spoken = await window.lectern.math.speak(
+    equations.map((item) => ({ latex: item.latex, display: item.display }))
+  )
+
+  // The chapter may have been closed while the batch was in flight.
+  if (!document.contains(body)) return
+
+  // Inline equations go into the paragraph as hidden text so the prose walk
+  // reads them in place; display equations stay as utterances of their own.
+  const displaySpeech = new Map<HTMLElement, string | null>()
+  const tally = { spoken: 0, deferred: 0, silent: 0 }
+
+  equations.forEach((item, at) => {
+    const raw = spoken[at] ?? null
+    const said = mathUtterance(item.latex, raw, item.display)
+    if (said === null) tally.silent += 1
+    else if (said === raw) tally.spoken += 1
+    else tally.deferred += 1
+
+    if (item.display) displaySpeech.set(item.element, said)
+    else injectInlineSpeech(item.element, said)
+  })
+
+  console.info(
+    `math: ${equations.length} equations, ${tally.spoken} spoken, ` +
+      `${tally.deferred} deferred to the screen, ${tally.silent} silent`
+  )
+
+  // Re-extracted rather than patched: the paragraphs now contain text they did
+  // not before, so their sentences, offsets and word-follow map all change.
+  const resumeAt = reader.state.index
+  const rebuilt = withMathSpeech(extract(body), displaySpeech)
+  reader.load(rebuilt, Math.min(resumeAt, Math.max(0, rebuilt.length - 1)))
 }
 
 /* ── Player ──────────────────────────────────────────────────────────── */
@@ -467,5 +524,11 @@ async function start(): Promise<void> {
   const target = resumeTarget()
   if (target) void open(target.bookId, target.file)
 }
+
+// A rejected promise inside a `void`ed call vanishes without trace, which cost
+// an afternoon once. Anything unhandled is reported.
+window.addEventListener('unhandledrejection', (event) => {
+  console.error(`unhandled: ${String(event.reason)}`)
+})
 
 void start()

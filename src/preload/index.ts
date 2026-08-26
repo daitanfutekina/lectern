@@ -36,6 +36,19 @@ const api = {
       ipcRenderer.invoke('progress:open', bookId, file)
   },
 
+  math: {
+    /**
+     * Spoken forms for a batch of equations. Batched deliberately: a chapter
+     * holds hundreds, and one round trip each would be hundreds of round trips.
+     */
+    speak: (
+      items: ReadonlyArray<{ latex: string; display: boolean }>
+    ): Promise<(string | null)[]> => ipcRenderer.invoke('math:speak', items),
+    /** Register a book's macros before converting any of its equations. */
+    configure: (macros: Readonly<Record<string, string>>): Promise<void> =>
+      ipcRenderer.invoke('math:configure', macros)
+  },
+
   bookmarks: {
     add: (
       bookId: string,

@@ -642,3 +642,18 @@ details.box[open] > summary::before {
   background: color-mix(in srgb, var(--accent) 34%, transparent);
   color: var(--text);
 }
+
+/*
+  An inline equation's spoken form, present in the text but not on screen. It
+  has to be in `textContent` for the speech walk to find it in the right place,
+  which rules out `display: none`.
+*/
+.math-speech {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

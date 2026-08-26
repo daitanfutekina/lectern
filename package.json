@@ -33,6 +33,8 @@
     "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
+    "speech-rule-engine": "^5.0.0-rc.4",
+    "temml": "^0.13.4",
     "unified": "^11.0.5",
     "unist-util-visit": "^5.1.0",
     "yaml": "^2.9.0"

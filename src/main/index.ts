@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { DEFAULT_ROOT, readChapterSource, saveIndex, scanLibrary } from './library'
+import { configureMath, speakMath } from './math-speech'
 import {
   addBookmark,
   flushProgress,
@@ -102,6 +103,23 @@ app.whenReady().then(() => {
   ipcMain.handle('library:get', () => library())
   ipcMain.handle('library:rescan', () => library(true))
 
+  ipcMain.handle('math:configure', (_event, macros: unknown) => {
+    configureMath(
+      macros && typeof macros === 'object' ? (macros as Record<string, string>) : {}
+    )
+  })
+
+  ipcMain.handle('math:speak', async (_event, items: unknown) => {
+    if (!Array.isArray(items)) return []
+    const cleaned = items
+      .filter(
+        (item): item is { latex: string; display: boolean } =>
+          Boolean(item) && typeof item.latex === 'string' && typeof item.display === 'boolean'
+      )
+      .slice(0, 2000)
+    return speakMath(cleaned)
+  })
+
   ipcMain.handle('library:chapter', async (_event, bookId: unknown, file: unknown) => {
     if (typeof bookId !== 'string' || typeof file !== 'string') return null
     const book = findBook(await library(), bookId)
@@ -175,9 +193,16 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
   await new Promise<void>((resolve) => {
     window.webContents.once('did-finish-load', () => resolve())
   })
-  // The library scan, the render, and the MathJax typeset all have to settle.
+  /*
+    The library scan, the render, the typeset and the mathematics-speech batch
+    all have to settle. LECTERN_WAIT extends this, and it applies whether or not
+    a click follows -- an earlier version honoured it only after a click, so a
+    run with no click captured at six seconds and reported a feature missing
+    that was in fact still working.
+  */
+  const settle = Number(process.env['LECTERN_WAIT'] ?? '') || 6000
   await new Promise<void>((resolve) => {
-    setTimeout(() => resolve(), 6000)
+    setTimeout(() => resolve(), settle)
   })
 
   /*
@@ -240,6 +265,14 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     bookmarks: document.querySelectorAll('.bookmark').length,
     // Speech, read from the real controls rather than from a debug hook.
     queue: document.querySelector('#speech-position')?.textContent || null,
+    mathBlocks: document.querySelectorAll('[data-latex]').length,
+    speechSpans: document.querySelectorAll('.math-speech').length,
+
+    inlineMathParagraph: (() => {
+      const p = [...document.querySelectorAll('.chapter-body p')]
+        .find((el) => el.querySelector('.math-inline'));
+      return p ? p.textContent.slice(0, 220) : 'none found';
+    })(),
     playing: document.querySelector('#play')?.getAttribute('aria-pressed') || null,
     voices: document.querySelector('#voice')?.options?.length ?? 0,
     rawVoices: (typeof speechSynthesis !== 'undefined') ? speechSynthesis.getVoices().length : 'NO speechSynthesis',

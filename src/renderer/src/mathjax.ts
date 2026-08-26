@@ -55,7 +55,15 @@ function load(): Promise<void> {
       // Never typeset inside code: a fenced block showing LaTeX source should
       // stay source.
       skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
-      enableMenu: false
+      enableMenu: false,
+      /*
+        MathJax's hidden MathML copy is switched off because its text lands in
+        `textContent`, which is what the speech queue reads. It gives a crude
+        approximation -- `x_1,\ldots,x_n` becomes "x1,x2,…,xn" -- and the
+        Speech Rule Engine's rendering of the same expression is far better.
+        The speech string is injected in its place once generated.
+      */
+      enableAssistiveMml: false
     },
     startup: { typeset: false }
   } as MathJaxLike & Record<string, unknown>

@@ -104,9 +104,13 @@ function mathAsText() {
       // stripped -- which is silently unspeakable as well as unrenderable.
       delete node['data']
       node['type'] = 'html'
+      // The LaTeX is carried on the wrapper as well as inside it. MathJax
+      // replaces the delimiters with its own element tree when it typesets and
+      // the source is then unrecoverable -- but generating speech needs it.
+      const attr = value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
       node['value'] = display
-        ? `<div class="math-display">\\[${value}\\]</div>`
-        : `<span class="math-inline">\\(${value}\\)</span>`
+        ? `<div class="math-display" data-latex="${attr}">\\[${value}\\]</div>`
+        : `<span class="math-inline" data-latex="${attr}">\\(${value}\\)</span>`
     })
   }
 }

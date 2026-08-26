@@ -22,6 +22,9 @@ export interface Utterance {
   /** Where this utterance begins within the block's spoken text. */
   readonly offset: number
   readonly kind: Block['kind']
+  /** Set for mathematics only: the source the spoken form is generated from. */
+  readonly latex?: string
+  readonly display?: boolean
 }
 
 /** Elements that are chrome or are never read aloud. */
@@ -76,7 +79,14 @@ export function extract(body: HTMLElement): Utterance[] {
     // recoverable but speaking it is M4's problem, so it is passed over here
     // rather than read as a string of symbol names.
     if (element.tagName.startsWith('MJX')) return
-    if (element.classList.contains('math-display') || element.classList.contains('math-inline')) return
+
+    // Mathematics is a block of its own, spoken from the LaTeX carried on the
+    // wrapper. Reading MathJax's rendered tree as text would produce a string
+    // of glyph names, which is worse than silence.
+    if (element.classList.contains('math-display') || element.classList.contains('math-inline')) {
+      addMath(out, element)
+      return
+    }
 
     if (LEAF_TAGS.has(element.tagName)) {
       addBlock(out, element, kindOf(element))
@@ -93,6 +103,111 @@ export function extract(body: HTMLElement): Utterance[] {
   }
 
   return out
+}
+
+/**
+ * A placeholder utterance for an equation.
+ *
+ * The text is empty at extraction time and filled in later, once the main
+ * process has converted the batch. Speech generation is not something to do
+ * one equation at a time inside a DOM walk, and the queue has to exist before
+ * the conversion can be requested for it.
+ */
+function addMath(out: Utterance[], element: HTMLElement): void {
+  const latex = element.dataset['latex']
+  if (!latex) return
+  out.push({
+    text: '',
+    element,
+    source: latex,
+    map: [],
+    offset: 0,
+    kind: 'math',
+    latex,
+    display: element.classList.contains('math-display')
+  })
+}
+
+export interface Equation {
+  readonly element: HTMLElement
+  readonly latex: string
+  readonly display: boolean
+}
+
+/**
+ * Every equation in the chapter, in document order.
+ *
+ * Collected by query rather than from the speech queue, because inline
+ * mathematics sits inside a paragraph and the prose walk stops at paragraphs
+ * -- it treats them as leaves, which is right for reading them and wrong for
+ * finding what is nested in them. Only display equations ever reach the queue
+ * as blocks of their own, and they are the minority.
+ */
+export function collectMath(body: HTMLElement): Equation[] {
+  return Array.from(body.querySelectorAll<HTMLElement>('[data-latex]')).map((element) => ({
+    element,
+    latex: element.dataset['latex'] ?? '',
+    display: element.classList.contains('math-display')
+  }))
+}
+
+/**
+ * Replace each equation placeholder with what it should say.
+ *
+ * Returns a new queue: entries the gate silenced are dropped rather than left
+ * as empty utterances, because an utterance with no text still costs a turn in
+ * the queue and a pause in the reading.
+ */
+export function withMathSpeech(
+  utterances: Utterance[],
+  speech: ReadonlyMap<HTMLElement, string | null>
+): Utterance[] {
+  const out: Utterance[] = []
+  for (const utterance of utterances) {
+    if (utterance.kind !== 'math') {
+      out.push(utterance)
+      continue
+    }
+    const said = speech.get(utterance.element)
+    if (!said) continue
+    out.push({ ...utterance, text: said, source: said, map: [] })
+  }
+  return out
+}
+
+/** Class on the hidden node that carries an inline equation's spoken form. */
+export const MATH_SPEECH_CLASS = 'math-speech'
+
+/**
+ * Put an inline equation's spoken form into the page, hidden.
+ *
+ * Inline mathematics sits inside a sentence, so it cannot be a separate
+ * utterance without breaking the sentence in two. Instead the spoken form is
+ * placed in the paragraph as hidden text, and the ordinary prose walk picks it
+ * up in the right position with the right offsets -- which is also what keeps
+ * word-follow working across it.
+ */
+export function injectInlineSpeech(element: HTMLElement, speech: string | null): void {
+  for (const old of Array.from(element.querySelectorAll(`.${MATH_SPEECH_CLASS}`))) old.remove()
+
+  /*
+    MathJax leaves a hidden MathML copy beside the visual output, and its text
+    lands in `textContent` -- so the paragraph read "x1,x2,…,xn" followed by the
+    real speech, saying the equation twice and the first time badly. Setting
+    `enableAssistiveMml: false` did not remove it, so it is removed here where
+    the outcome is observable rather than configured.
+
+    This does cost external screen-reader semantics. The trade is deliberate:
+    this application supplies its own spoken form, and a better one.
+  */
+  for (const mml of Array.from(element.querySelectorAll('mjx-assistive-mml'))) mml.remove()
+
+  if (!speech) return
+  const hidden = document.createElement('span')
+  hidden.className = MATH_SPEECH_CLASS
+  // Spaces around it, or the equation runs into the words on either side.
+  hidden.textContent = ` ${speech} `
+  element.append(hidden)
 }
 
 function addBlock(out: Utterance[], element: HTMLElement, kind: Block['kind']): void {
