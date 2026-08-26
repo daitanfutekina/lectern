@@ -82,11 +82,16 @@ body {
 
 #sidebar-head {
   display: flex;
+  /* Four controls do not fit one 300px row; wrapping beats clipping "Rescan". */
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 18px;
+  gap: 8px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+#sidebar-head h1 {
+  flex: 1 1 auto;
 }
 
 #sidebar-head h1 {
@@ -116,10 +121,17 @@ body {
 #books {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px 10px 24px;
 }
 
+/*
+  A long file name is a title here, and some of them are very long. Wrapping
+  rather than overflowing keeps the sidebar from growing a horizontal scrollbar
+  that scrolls the whole panel sideways.
+*/
 .book-title {
+  overflow-wrap: anywhere;
   padding: 12px 8px 6px;
   color: var(--text-muted);
   font-size: 12px;
@@ -130,6 +142,7 @@ body {
 
 .chapter-link {
   display: block;
+  overflow-wrap: anywhere;
   width: 100%;
   padding: 7px 10px;
   border: 0;
@@ -870,16 +883,52 @@ body.is-home #flag-bar {
 }
 
 .shelf-hint {
+  flex: 1 1 100%;
   margin: 0;
   color: var(--text-faint);
   font-size: 13px;
 }
 
+/*
+  Three across at most.
+
+  `auto-fill` alone put six or seven tiny covers on a wide window, which is a
+  file listing with pictures rather than a shelf -- a cover has to be big enough
+  to be recognised as one.
+*/
 .shelf {
   display: grid;
-  max-width: none;
-  gap: 28px 24px;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  max-width: 720px;
+  margin-inline: 0;
+  gap: 30px 26px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+.shelf-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: baseline;
+}
+
+.shelf-header h2 {
+  flex: 1 1 auto;
+}
+
+.shelf-sort {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.shelf-sort:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .shelf-card {

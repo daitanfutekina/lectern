@@ -38,6 +38,8 @@ const api = {
         return ''
       }
     },
+    /** When each added document joined the library, keyed by book id. */
+    addedTimes: (): Promise<Record<string, number>> => ipcRenderer.invoke('library:added-times'),
     /** A book's cover as a data URL, where its format carries one. */
     cover: (bookId: string): Promise<string | null> => ipcRenderer.invoke('library:cover', bookId),
     /** Raw Markdown for one chapter, or null if the book or file is unknown. */

@@ -8,7 +8,7 @@ import { epubCover } from './epub'
 import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
 import { watchLibrary } from './watch'
-import { addDocuments, configureDocuments } from './documents'
+import { addDocuments, configureDocuments, livingDocuments } from './documents'
 import { configurePiper, listVoices, speak as speakPiper } from './piper'
 import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { flagId, type Flag, type FlagKind } from '@shared/flags'
@@ -280,6 +280,17 @@ app.whenReady().then(() => {
     return result
   })
 
+  ipcMain.handle('library:added-times', async () => {
+    const times: Record<string, number> = {}
+    for (const entry of await livingDocuments()) {
+      // Both separators, or a Windows path comes back whole.
+      const name = entry.path.split(/[\\/]/).pop() ?? entry.path
+      const format = name.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf'
+      times[`${format}:${name}`] = entry.addedAt
+    }
+    return times
+  })
+
   ipcMain.handle('library:cover', async (_event, bookId: unknown) => {
     if (typeof bookId !== 'string') return null
     const book = findBook(await library(), bookId)
@@ -474,9 +485,16 @@ LIVE-RELOAD-MARKER
     shelfCards: document.querySelectorAll('.shelf-card').length,
     shelfIds: [...document.querySelectorAll('.shelf-card')].map((c) => c.dataset.book).slice(0, 6),
     flagCount: document.querySelectorAll('.flag').length,
+    // Whether a scrollbar is actually visible, not whether the content is
+    // wider than the box -- an element hiding its overflow reports the second
+    // and shows neither, which had this reporting a bug that was not there.
+    // (No backticks in here: this whole block is a template literal.)
     sidebarScrolls: (() => {
       const el = document.querySelector('#sidebar');
-      return el ? el.scrollWidth > el.clientWidth + 1 : null;
+      if (!el) return null;
+      const style = getComputedStyle(el);
+      const scrollable = style.overflowX === 'auto' || style.overflowX === 'scroll';
+      return scrollable && el.scrollWidth > el.clientWidth + 1;
     })(),
     flagBarOpen: document.querySelector('#flag-bar')?.classList.contains('is-open') ?? false,
 

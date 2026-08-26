@@ -305,6 +305,82 @@ export function rangeWithin(element: HTMLElement, from: number, to: number): Ran
   return range
 }
 
+/**
+ * The source-text span an utterance covers.
+ *
+ * Needed because a whole PDF page is one block: every sentence on it shares an
+ * element, so anything that works on elements alone -- scrolling to the spoken
+ * sentence, or finding which sentence was clicked -- lands on the top of the
+ * page instead.
+ */
+export function utteranceSpan(utterance: Utterance): { from: number; to: number } {
+  if (utterance.map.length === 0) return { from: 0, to: utterance.source.length }
+  const from = sourceIndex(utterance, 0)
+  const to = sourceIndex(utterance, utterance.text.length - 1) + 1
+  return { from, to: Math.max(to, from + 1) }
+}
+
+/** A DOM range covering an utterance's text, for scrolling or highlighting. */
+export function utteranceRange(utterance: Utterance): Range | null {
+  const span = utteranceSpan(utterance)
+  return rangeWithin(utterance.element, span.from, span.to)
+}
+
+/**
+ * Flat character offset of a position inside an element.
+ *
+ * `textContent` concatenates every descendant text node, and offsets everywhere
+ * else in the speech pipeline address that flat string -- so a click, which
+ * arrives as a node and an offset within it, has to be converted the same way.
+ */
+export function flatOffset(element: HTMLElement, node: Node, offset: number): number {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  let seen = 0
+  while (walker.nextNode()) {
+    const current = walker.currentNode as Text
+    if (current === node) return seen + offset
+    seen += current.data.length
+  }
+  return seen
+}
+
+/**
+ * The text position under a point on screen.
+ *
+ * Returns the block the point is in and the offset within it, or null when the
+ * point is not over text at all.
+ */
+export function positionAtPoint(x: number, y: number): { element: HTMLElement; offset: number } | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    caretRangeFromPoint?: (x: number, y: number) => Range | null
+  }
+
+  let node: Node | null = null
+  let offset = 0
+
+  const position = doc.caretPositionFromPoint?.(x, y)
+  if (position) {
+    node = position.offsetNode
+    offset = position.offset
+  } else {
+    const range = doc.caretRangeFromPoint?.(x, y)
+    if (range) {
+      node = range.startContainer
+      offset = range.startOffset
+    }
+  }
+  if (!node) return null
+
+  const parent = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement
+  const element = parent?.closest<HTMLElement>(
+    '.pdf-text-layer, .chapter-body p, .chapter-body li, .chapter-body h1, .chapter-body h2, .chapter-body h3, .chapter-body h4, p, li, h1, h2, h3, h4'
+  )
+  if (!element) return null
+
+  return { element, offset: flatOffset(element, node, offset) }
+}
+
 /** Where a spoken offset lands in the source text. */
 export function sourceIndex(utterance: Utterance, spokenOffset: number): number {
   const index = utterance.offset + spokenOffset

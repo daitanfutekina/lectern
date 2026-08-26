@@ -88,3 +88,57 @@ export function shelfSubtitle(entry: ShelfEntry): string {
       : `${entry.words.toLocaleString()} words`
   return `${chapters} · ${words}`
 }
+
+
+/* ── Sorting ───────────────────────────────────────────────────────── */
+
+export type ShelfSort = 'added' | 'read' | 'title' | 'format'
+
+export const SORT_LABELS: Readonly<Record<ShelfSort, string>> = {
+  added: 'Recently added',
+  read: 'Recently read',
+  title: 'Title',
+  format: 'File type'
+}
+
+export const SORT_ORDER: readonly ShelfSort[] = ['added', 'read', 'title', 'format']
+
+export function isShelfSort(value: unknown): value is ShelfSort {
+  return typeof value === 'string' && (SORT_ORDER as readonly string[]).includes(value)
+}
+
+export interface SortFacts {
+  /** When the document joined the library. Zero for books that were always there. */
+  readonly addedAt: number
+  /** When it was last opened. Zero for never. */
+  readonly readAt: number
+}
+
+/**
+ * Order the shelf.
+ *
+ * Ties fall back to title in every mode, so the grid never reshuffles between
+ * two renders just because two books share a timestamp -- a shelf that moves
+ * under the cursor is worse than one sorted slightly differently than expected.
+ */
+export function sortShelf(
+  entries: readonly ShelfEntry[],
+  sort: ShelfSort,
+  facts: (id: string) => SortFacts
+): ShelfEntry[] {
+  const byTitle = (a: ShelfEntry, b: ShelfEntry): number =>
+    a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
+
+  return [...entries].sort((a, b) => {
+    switch (sort) {
+      case 'added':
+        return facts(b.id).addedAt - facts(a.id).addedAt || byTitle(a, b)
+      case 'read':
+        return facts(b.id).readAt - facts(a.id).readAt || byTitle(a, b)
+      case 'format':
+        return a.format.localeCompare(b.format) || byTitle(a, b)
+      case 'title':
+        return byTitle(a, b)
+    }
+  })
+}

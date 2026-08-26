@@ -1,7 +1,7 @@
 import { clampRate } from '@shared/speech'
 import { BOOK_VOICE, speak as speakNeural, type Playing } from './neural-voice'
 import type { VoiceShape } from '@shared/voice'
-import { rangeWithin, sourceIndex, type Utterance } from './blocks'
+import { rangeWithin, sourceIndex, utteranceRange, utteranceSpan, type Utterance } from './blocks'
 
 /**
  * Reading aloud. SPEC section 5.
@@ -173,7 +173,7 @@ export class Reader {
       // Skipping while paused still moves the view. Otherwise the counter
       // changes, nothing else does, and the control looks broken.
       const utterance = this.queue[this.at]
-      if (utterance) this.showElement(utterance.element)
+      if (utterance) this.showUtterance(utterance)
       this.clearHighlight()
     }
     this.emit()
@@ -185,6 +185,31 @@ export class Reader {
     if (found >= 0) return found
     const found2 = this.queue.findIndex((utterance) => element.contains(utterance.element))
     return found2 >= 0 ? found2 : 0
+  }
+
+  /**
+   * The utterance covering a character offset inside a block.
+   *
+   * Matching on the element alone is not enough where a whole PDF page is one
+   * block: every sentence on it shares an element, so a click anywhere on the
+   * page started reading from the top of it -- sometimes a screen and a half
+   * above where the reader had actually pointed.
+   */
+  indexAt(element: HTMLElement, offset: number): number {
+    let fallback = -1
+
+    for (const [at, utterance] of this.queue.entries()) {
+      if (utterance.element !== element) continue
+      if (fallback < 0) fallback = at
+
+      const span = utteranceSpan(utterance)
+      if (offset >= span.from && offset < span.to) return at
+      // Past the click: the nearest sentence that starts after it.
+      if (span.from > offset) return at
+    }
+
+    if (fallback >= 0) return fallback
+    return this.indexNear(element)
   }
 
   current(): Utterance | null {
@@ -258,7 +283,7 @@ export class Reader {
     })
 
     this.live = spoken
-    this.showElement(utterance.element)
+    this.showUtterance(utterance)
     speechSynthesis.speak(spoken)
   }
 
@@ -295,7 +320,7 @@ export class Reader {
     }
 
     this.playing_ = playing
-    this.showElement(utterance.element)
+    this.showUtterance(utterance)
 
     await playing.done
     if (this.neuralToken !== token || !this.playing) return
@@ -342,18 +367,31 @@ export class Reader {
     }
   }
 
-  /** Keep the sentence being spoken on screen, without yanking the page around. */
-  private showElement(element: HTMLElement): void {
-    const container = element.closest('#content')
+  /**
+   * Keep the sentence being spoken on screen, without yanking the page around.
+   *
+   * Scrolls to the *sentence*, not to the block holding it. On a PDF the block
+   * is a whole page, so scrolling to it put the top of the page in view while
+   * the voice read something near the bottom -- which is what made the reading
+   * position feel lost.
+   */
+  private showUtterance(utterance: Utterance): void {
+    const container = utterance.element.closest('#content')
     if (!(container instanceof HTMLElement)) return
 
-    const box = element.getBoundingClientRect()
-    const view = container.getBoundingClientRect()
-    const margin = 80
+    const range = utteranceRange(utterance)
+    const box = range?.getBoundingClientRect()
+    // A collapsed rect means the range resolved to nothing useful; the element
+    // is a worse answer but a better one than not scrolling at all.
+    const target =
+      box && box.height > 0 ? box : utterance.element.getBoundingClientRect()
 
-    if (box.top >= view.top + margin && box.bottom <= view.bottom - margin) return
+    const view = container.getBoundingClientRect()
+    const margin = 120
+
+    if (target.top >= view.top + margin && target.bottom <= view.bottom - margin) return
     container.scrollTo({
-      top: container.scrollTop + (box.top - view.top) - margin,
+      top: container.scrollTop + (target.top - view.top) - margin,
       behavior: 'smooth'
     })
   }

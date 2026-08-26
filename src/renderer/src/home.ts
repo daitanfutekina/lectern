@@ -1,4 +1,15 @@
-import { FORMAT_COLOUR, initials, shelfSubtitle, shelfEntry, type ShelfEntry } from '@shared/shelf'
+import {
+  FORMAT_COLOUR,
+  SORT_LABELS,
+  SORT_ORDER,
+  initials,
+  shelfEntry,
+  shelfSubtitle,
+  sortShelf,
+  type ShelfEntry,
+  type ShelfSort,
+  type SortFacts
+} from '@shared/shelf'
 import type { Book, LibraryIndex } from '@shared/library'
 
 /**
@@ -18,11 +29,18 @@ type OnOpen = (bookId: string) => void
 
 const covers = new Map<string, string>()
 
+export interface HomeOptions {
+  readonly sort: ShelfSort
+  readonly facts: (id: string) => SortFacts
+  readonly onSort: (sort: ShelfSort) => void
+}
+
 export function renderHome(
   container: HTMLElement,
   index: LibraryIndex,
   progressOf: (book: Book) => number | null,
-  onOpen: OnOpen
+  onOpen: OnOpen,
+  options: HomeOptions
 ): void {
   container.replaceChildren()
 
@@ -39,15 +57,31 @@ export function renderHome(
       ? `Drop a PDF or EPUB here, or put a book folder in ${index.root}\\books`
       : 'Drop a PDF or EPUB anywhere on this window to add it.'
   header.append(hint)
-  container.append(header)
 
+  if (index.books.length > 1) {
+    const sort = document.createElement('select')
+    sort.className = 'shelf-sort'
+    sort.title = 'Order the shelf'
+    for (const option of SORT_ORDER) {
+      const item = document.createElement('option')
+      item.value = option
+      item.textContent = SORT_LABELS[option]
+      sort.append(item)
+    }
+    sort.value = options.sort
+    sort.addEventListener('change', () => options.onSort(sort.value as ShelfSort))
+    header.append(sort)
+  }
+
+  container.append(header)
   if (index.books.length === 0) return
 
   const grid = document.createElement('div')
   grid.className = 'shelf'
 
-  for (const book of index.books) {
-    grid.append(card(shelfEntry(book, progressOf(book)), onOpen))
+  const entries = index.books.map((book) => shelfEntry(book, progressOf(book)))
+  for (const entry of sortShelf(entries, options.sort, options.facts)) {
+    grid.append(card(entry, onOpen))
   }
   container.append(grid)
 }

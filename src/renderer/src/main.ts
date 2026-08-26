@@ -16,12 +16,20 @@ import {
 import type { Book, Chapter, LibraryIndex } from '@shared/library'
 import { typeset, configureMacros } from './mathjax'
 import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
-import { collectMath, extract, injectInlineSpeech, withMathSpeech, type Utterance } from './blocks'
+import {
+  collectMath,
+  extract,
+  injectInlineSpeech,
+  positionAtPoint,
+  withMathSpeech,
+  type Utterance
+} from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
 import { voiceFolder, voices as neuralVoices } from './neural-voice'
 import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { hasCover, renderHome, setCover } from './home'
+import { isShelfSort, type ShelfSort } from '@shared/shelf'
 import { pdfCover, renderBook, type PdfView } from './pdf-view'
 import { renderEpub } from './epub-view'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
@@ -47,6 +55,21 @@ let restoring = false
 /** Flags in the library, and the paragraph currently being flagged. */
 let flags: readonly Flag[] = []
 let flagging: HTMLElement | null = null
+
+/** How the shelf is ordered, remembered between sessions. */
+let shelfSort: ShelfSort = readStoredSort()
+
+/** When each added document joined the library, for "recently added". */
+const addedTimes = new Map<string, number>()
+
+function readStoredSort(): ShelfSort {
+  try {
+    const stored = localStorage.getItem('lectern.shelfSort')
+    return isShelfSort(stored) ? stored : 'added'
+  } catch {
+    return 'added'
+  }
+}
 
 /**
  * Zoom multiplier for the PDF view, on top of fitting the page to the pane.
@@ -739,17 +762,6 @@ async function setUpPlayer(): Promise<void> {
     showing them the thing they were trying to get away from.
   */
   const neural = await neuralVoices()
-  if (neural.length > 0) {
-    const group = document.createElement('optgroup')
-    group.label = 'Neural (Piper)'
-    for (const voice of neural) {
-      const option = document.createElement('option')
-      option.value = `piper:${voice.id}`
-      option.textContent = voice.name
-      group.append(option)
-    }
-    select.append(group)
-  }
 
   // Shape controls only matter for a neural voice; the system ones expose
   // nothing but a rate.
@@ -781,11 +793,40 @@ async function setUpPlayer(): Promise<void> {
 
     const chosen = reader.state.voice
     select.replaceChildren()
+
+    /*
+      Neural voices first, then the system ones.
+
+      Added inside this function rather than before it: filling the system
+      voices calls `replaceChildren`, so a group appended earlier is wiped the
+      moment the voice list arrives -- which is exactly what happened, and left
+      the picker showing only the voices the reader was trying to get away from.
+    */
+    if (neural.length > 0) {
+      const group = document.createElement('optgroup')
+      group.label = 'Neural (Piper)'
+      for (const voice of neural) {
+        const option = document.createElement('option')
+        option.value = `piper:${voice.id}`
+        option.textContent = voice.name
+        group.append(option)
+      }
+      select.append(group)
+    }
+
     for (const voice of sorted) {
       const option = document.createElement('option')
       option.value = voice.name
       option.textContent = `${voice.name} (${voice.lang})`
       select.append(option)
+    }
+
+    // A reader who installed a neural voice did so because the system ones
+    // were not good enough, so it stays selected across a refill.
+    const first = neural[0]
+    if (first) {
+      select.value = `piper:${first.id}`
+      return
     }
 
     const preferred = sorted.find((voice) => voice.name === chosen) ?? sorted[0]
@@ -842,14 +883,41 @@ function showHome(): void {
   current = null
 
   document.body.classList.add('is-home')
-  renderHome(container, index, progressOf, (bookId) => {
-    const book = findBook(index, bookId)
-    const stored = bookProgress(bookId)
-    // Opening a book means continuing it, not restarting it.
-    const last = stored.lastChapter
-    const chapter = book?.chapters.find((c) => c.file === last) ?? book?.chapters[0]
-    if (book && chapter) void open(book.id, chapter.file)
-  })
+  renderHome(
+    container,
+    index,
+    progressOf,
+    (bookId) => {
+      const book = findBook(index, bookId)
+      const stored = bookProgress(bookId)
+      // Opening a book means continuing it, not restarting it.
+      const last = stored.lastChapter
+      const chapter = book?.chapters.find((c) => c.file === last) ?? book?.chapters[0]
+      if (book && chapter) void open(book.id, chapter.file)
+    },
+    {
+      sort: shelfSort,
+      facts: (id) => {
+        const stored = bookProgress(id)
+        const chapters = Object.values(stored.chapters)
+        return {
+          // Books in `books/` have always been there, so they sort as oldest
+          // rather than jostling with whatever was dropped in most recently.
+          addedAt: addedTimes.get(id) ?? 0,
+          readAt: chapters.reduce((latest, entry) => Math.max(latest, entry?.updatedAt ?? 0), 0)
+        }
+      },
+      onSort: (sort) => {
+        shelfSort = sort
+        try {
+          localStorage.setItem('lectern.shelfSort', sort)
+        } catch {
+          // A preference that cannot be stored is still worth honouring now.
+        }
+        showHome()
+      }
+    }
+  )
 
   renderSidebar()
   renderNav(null, null)
@@ -965,6 +1033,13 @@ function announce(message: string): void {
 /* ── Startup ─────────────────────────────────────────────────────────── */
 
 async function load(rescan = false): Promise<void> {
+  try {
+    const times = await window.lectern.library.addedTimes()
+    addedTimes.clear()
+    for (const [id, at] of Object.entries(times)) addedTimes.set(id, at)
+  } catch {
+    // Without them "recently added" degrades to title order, which is fine.
+  }
   index = rescan ? await window.lectern.library.rescan() : await window.lectern.library.get()
   renderSidebar()
 }
@@ -1069,7 +1144,22 @@ async function start(): Promise<void> {
     if (target.closest('button, a, summary, input, select')) return
     if ((window.getSelection()?.toString() ?? '').length > 0) return
 
-    const block = target.closest('p, h1, h2, h3, h4, h5, h6, li')
+    /*
+      Where the reader actually pointed, not merely which block they hit.
+
+      Matching the block alone starts a PDF page from its first sentence
+      wherever on the page the click landed -- which on a full page is most of a
+      screen away from the words under the cursor.
+    */
+    const position = positionAtPoint(event.clientX, event.clientY)
+    if (position) {
+      if (position.element.dataset['speak'] === 'no') return
+      reader.jumpTo(reader.indexAt(position.element, position.offset))
+      reader.play()
+      return
+    }
+
+    const block = target.closest('p, h1, h2, h3, h4, h5, h6, li, .pdf-text-layer')
     if (!(block instanceof HTMLElement)) return
     if (block.dataset['speak'] === 'no') return
 

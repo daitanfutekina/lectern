@@ -31,20 +31,27 @@ const require = createRequire(import.meta.url)
 
 export { BOOK_VOICE }
 
-type TtsHandle = {
-  sampleRate: number
-  numSpeakers: number
-  generate: (options: { text: string; sid: number; speed: number }) => {
-    samples: Float32Array
-    sampleRate: number
-  }
-}
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+
+/**
+ * Synthesis runs in a separate Node process.
+ *
+ * Electron builds V8 with its sandbox on, and a sandboxed V8 refuses the
+ * external `ArrayBuffer` sherpa-onnx hands back from `generate` -- including
+ * under `ELECTRON_RUN_AS_NODE`, which is still the same binary and the same V8.
+ * Loading the model works; asking for audio throws "External buffers are not
+ * allowed". A real Node process has no such restriction, and synthesis there
+ * runs at about twenty times realtime.
+ *
+ * The cost is a dependency on `node` being on PATH, which is fine while running
+ * from source and is the open question for packaging.
+ */
 
 let root = ''
 
 export function configurePiper(libraryRoot: string): void {
   root = libraryRoot
-  loaded.clear()
+  void shutdownPiper()
 }
 
 const voicesDir = (): string => join(root, '.library', 'voices')
@@ -53,7 +60,7 @@ const voicesDir = (): string => join(root, '.library', 'voices')
  * Voices present on disk.
  *
  * A folder is a voice when it holds a model and its tokens. Anything else is
- * ignored silently -- a half-downloaded voice should not appear in a picker.
+ * ignored silently -- a half-extracted voice should not appear in a picker.
  */
 export async function listVoices(): Promise<PiperVoice[]> {
   let names: string[] = []
@@ -69,17 +76,10 @@ export async function listVoices(): Promise<PiperVoice[]> {
     try {
       if (!(await stat(path)).isDirectory()) continue
       const files = await readdir(path)
-      const model = files.find((file) => file.endsWith('.onnx'))
-      const tokens = files.find((file) => file === 'tokens.txt')
-      if (!model || !tokens) continue
+      if (!files.some((file) => file.endsWith('.onnx'))) continue
+      if (!files.includes('tokens.txt')) continue
 
-      found.push({
-        id: name,
-        name: prettyName(name),
-        path,
-        sampleRate: 22050,
-        speakers: 1
-      })
+      found.push({ id: name, name: prettyName(name), path, sampleRate: 22050, speakers: 1 })
     } catch {
       // Unreadable folder; not a voice as far as the picker is concerned.
     }
@@ -87,53 +87,124 @@ export async function listVoices(): Promise<PiperVoice[]> {
   return found
 }
 
-/** `en_GB-alba-medium` reads better as `Alba (en GB, medium)`. */
+/** `vits-piper-en_GB-alba-medium` reads better as `Alba (en GB, medium)`. */
 function prettyName(id: string): string {
-  const match = /^([a-z]{2})[_-]([A-Z]{2})-(.+?)-(.+)$/.exec(id)
+  const match = /^(?:vits-piper-)?([a-z]{2})[_-]([A-Z]{2})-(.+?)-(.+)$/.exec(id)
   if (!match) return id
   const [, language, region, voice, quality] = match
-  return `${(voice ?? '').replace(/_/g, ' ')} (${language} ${region}, ${quality})`
+  const name = (voice ?? '').replace(/_/g, ' ')
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} (${language} ${region}, ${quality})`
 }
 
-const loaded = new Map<string, TtsHandle>()
+interface Worker {
+  readonly process: ChildProcessWithoutNullStreams
+  readonly key: string
+  readonly ready: Promise<boolean>
+  readonly pending: Map<number, (value: Spoken | null) => void>
+  sampleRate: number
+}
 
-function open(voice: PiperVoice, shape: VoiceShape): TtsHandle | null {
-  const key = `${voice.id}|${shape.lengthScale}|${shape.noiseScale}|${shape.noiseW}`
-  const cached = loaded.get(key)
-  if (cached) return cached
+let worker: Worker | null = null
+let nextId = 1
+
+const shapeKey = (voice: PiperVoice, shape: VoiceShape): string =>
+  `${voice.id}|${shape.lengthScale}|${shape.noiseScale}|${shape.noiseW}`
+
+/**
+ * Start a worker for a voice and shape, replacing one running with different
+ * settings. The shape is baked into the model at load time, so a change means a
+ * restart -- cheap, at about a second.
+ */
+function ensureWorker(voice: PiperVoice, shape: VoiceShape): Worker | null {
+  const key = shapeKey(voice, shape)
+  if (worker && worker.key === key) return worker
+
+  void shutdownPiper()
 
   try {
-    const sherpa = require('sherpa-onnx-node') as {
-      OfflineTts: new (config: unknown) => TtsHandle
-    }
+    const script = join(__dirname, '..', '..', 'scripts', 'piper-worker.cjs')
+    const child = spawn(
+      'node',
+      [
+        script,
+        voice.path,
+        String(shape.lengthScale),
+        String(shape.noiseScale),
+        String(shape.noiseW)
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
+    )
 
-    const files = require('node:fs').readdirSync(voice.path) as string[]
-    const model = files.find((file: string) => file.endsWith('.onnx'))
-    if (!model) return null
+    const pending = new Map<number, (value: Spoken | null) => void>()
+    let buffered = ''
 
-    const handle = new sherpa.OfflineTts({
-      model: {
-        vits: {
-          model: join(voice.path, model),
-          tokens: join(voice.path, 'tokens.txt'),
-          dataDir: join(voice.path, 'espeak-ng-data'),
-          lengthScale: shape.lengthScale,
-          noiseScale: shape.noiseScale,
-          noiseScaleW: shape.noiseW
-        },
-        numThreads: 2,
-        debug: false,
-        provider: 'cpu'
-      },
-      maxNumSentences: 1
+    const ready = new Promise<boolean>((resolve) => {
+      const onData = (chunk: Buffer): void => {
+        buffered += chunk.toString('utf8')
+        let newline = buffered.indexOf('\n')
+        while (newline >= 0) {
+          const line = buffered.slice(0, newline)
+          buffered = buffered.slice(newline + 1)
+          if (line.trim()) {
+            const message = parse(line)
+            if (message && 'ready' in message) resolve(Boolean(message['ready']))
+            else if (message) settle(pending, message)
+          }
+          newline = buffered.indexOf('\n')
+        }
+      }
+      child.stdout.on('data', onData)
+      child.once('error', () => resolve(false))
+      child.once('exit', () => {
+        resolve(false)
+        for (const resolveOne of pending.values()) resolveOne(null)
+        pending.clear()
+        if (worker?.process === child) worker = null
+      })
     })
 
-    loaded.set(key, handle)
-    return handle
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8').trim()
+      if (text) process.stderr.write(`piper: ${text.slice(0, 200)}\n`)
+    })
+
+    worker = { process: child, key, ready, pending, sampleRate: 22050 }
+    return worker
   } catch (error) {
-    process.stderr.write(`piper voice unavailable: ${String(error)}\n`)
+    process.stderr.write(`piper unavailable: ${String(error)}\n`)
     return null
   }
+}
+
+function parse(line: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(line)
+    return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function settle(
+  pending: Map<number, (value: Spoken | null) => void>,
+  message: Record<string, unknown>
+): void {
+  const id = typeof message['id'] === 'number' ? message['id'] : -1
+  const resolveOne = pending.get(id)
+  if (!resolveOne) return
+  pending.delete(id)
+
+  if (message['ok'] !== true || typeof message['pcm'] !== 'string') {
+    resolveOne(null)
+    return
+  }
+
+  const bytes = Buffer.from(message['pcm'], 'base64')
+  const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2)
+  resolveOne({
+    pcm: Int16Array.from(pcm),
+    sampleRate: typeof message['sampleRate'] === 'number' ? message['sampleRate'] : 22050
+  })
 }
 
 export interface Spoken {
@@ -142,12 +213,7 @@ export interface Spoken {
   readonly sampleRate: number
 }
 
-/**
- * Synthesise one utterance.
- *
- * Returned as PCM rather than played here: the main process has no audio
- * output, and the renderer already owns playback, timing and the queue.
- */
+/** Synthesise one utterance, or null when no voice is available. */
 export async function speak(
   voiceId: string,
   text: string,
@@ -157,21 +223,37 @@ export async function speak(
   const voice = (await listVoices()).find((entry) => entry.id === voiceId)
   if (!voice) return null
 
-  const handle = open(voice, shape)
-  if (!handle) return null
+  const active = ensureWorker(voice, shape)
+  if (!active) return null
+  if (!(await active.ready)) return null
 
-  try {
-    const result = handle.generate({ text, sid: 0, speed })
-    // Float32 in, Int16 out: a Float32Array crosses IPC at twice the size for
-    // no gain, and 16-bit is what the audio graph wants anyway.
-    const pcm = new Int16Array(result.samples.length)
-    for (let at = 0; at < result.samples.length; at += 1) {
-      const sample = Math.max(-1, Math.min(1, result.samples[at] ?? 0))
-      pcm[at] = Math.round(sample * 32767)
+  const id = nextId
+  nextId += 1
+
+  return new Promise<Spoken | null>((resolve) => {
+    active.pending.set(id, resolve)
+    try {
+      active.process.stdin.write(`${JSON.stringify({ id, text, speed })}\n`)
+    } catch {
+      active.pending.delete(id)
+      resolve(null)
     }
-    return { pcm, sampleRate: result.sampleRate }
-  } catch (error) {
-    process.stderr.write(`piper failed on "${text.slice(0, 40)}": ${String(error)}\n`)
-    return null
+    // A worker that dies mid-sentence must not leave the reader waiting.
+    setTimeout(() => {
+      if (active.pending.delete(id)) resolve(null)
+    }, 30_000)
+  })
+}
+
+export async function shutdownPiper(): Promise<void> {
+  const active = worker
+  worker = null
+  if (!active) return
+  for (const resolveOne of active.pending.values()) resolveOne(null)
+  active.pending.clear()
+  try {
+    active.process.kill()
+  } catch {
+    // Already gone.
   }
 }
