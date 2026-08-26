@@ -14,9 +14,20 @@ Everything is free and offline. No paid service, no account, no network.
 - [x] **M5** — Digital PDF and EPUB adapters
 - [x] **M6** — OCR pipeline and background queue
 - [x] **M7** — Flagged passages and index export
+- [x] **M8** — PDFs shown as PDFs, EPUBs with the publisher's typography
+- [x] **M9** — Neural voices, character voices, and a settings page
 
-All seven are done, each against the explicit *done when* in
+Each was done against the explicit *done when* in
 [docs/SPEC.md](docs/SPEC.md) section 11.
+
+## Reading aloud
+
+Speech is the point of the application. The Windows system voices are the
+fallback; the default is Piper, a free local neural voice, and on top of that a
+character voice can convert the result into someone else.
+
+Neither kind of voice is in this repository — they are hundreds of megabytes of
+model weights. [docs/VOICES.md](docs/VOICES.md) says what to install and where.
 
 ## The shelf
 
