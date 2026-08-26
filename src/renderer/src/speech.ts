@@ -49,6 +49,7 @@ export class Reader {
    */
   private neuralVoice: string | null = null
   private shape: VoiceShape = BOOK_VOICE
+  private pauseScale = 1
   private playing_: Playing | null = null
 
   /**
@@ -102,6 +103,11 @@ export class Reader {
 
   currentShape(): VoiceShape {
     return this.shape
+  }
+
+  /** Scale the silence between sentences; 0 runs them together. */
+  setPauseScale(scale: number): void {
+    this.pauseScale = Number.isFinite(scale) ? Math.min(Math.max(scale, 0), 3) : 1
   }
 
   setRate(rate: number): void {
@@ -301,7 +307,7 @@ export class Reader {
     let playing: Playing
     try {
       playing = await speakNeural(
-        { text: utterance.text, voiceId, shape: this.shape, speed: this.rate },
+        { text: utterance.text, voiceId, shape: this.shape, speed: this.rate, pauseScale: this.pauseScale },
         (charIndex) => {
           if (this.neuralToken !== token) return
           this.highlightWord(utterance, charIndex, 0)

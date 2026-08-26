@@ -59,7 +59,9 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 16px;
+  /* Scaled from settings, so text size is the reader's choice rather than the
+     window's -- the window zoom is pinned at 1x deliberately. */
+  font-size: calc(16px * var(--font-size-scale, 1));
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
 }
@@ -1264,4 +1266,119 @@ body.is-collapsed #library-meta {
 
 #voice-hint[hidden] {
   display: none;
+}
+
+
+/* ── Settings ──────────────────────────────────────────────────────── */
+
+#content > .settings {
+  max-width: 620px;
+  margin-inline: 0;
+}
+
+.settings-title {
+  margin: 0 0 24px;
+  border: 0;
+  padding: 0;
+  font-size: 24px;
+}
+
+.settings-group {
+  margin-bottom: 34px;
+}
+
+.settings-heading {
+  margin: 0 0 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.settings-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 0;
+}
+
+.settings-label {
+  flex: 0 0 190px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+.settings-slider {
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  align-items: center;
+}
+
+.settings-slider input {
+  flex: 1;
+  max-width: 200px;
+  accent-color: var(--accent);
+}
+
+/*
+  The readout says what the position means. A slider labelled "Pace: 1.35" tells
+  a reader nothing about whether to move it; "about 155 words per minute" does.
+*/
+.settings-readout {
+  min-width: 150px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-select {
+  min-width: 220px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-button {
+  padding: 6px 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.settings-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.settings-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.settings-note {
+  margin: 6px 0 0;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  line-height: 1.6;
 }

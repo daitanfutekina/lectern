@@ -18,6 +18,8 @@ export interface NeuralUtterance {
   readonly voiceId: string
   readonly shape: VoiceShape
   readonly speed: number
+  /** Scales the gap after this sentence; 0 runs it into the next. */
+  readonly pauseScale?: number
 }
 
 export interface Playing {
@@ -138,7 +140,7 @@ export async function speak(
         of audio buffers played back to back leaves none, so every sentence
         starts the instant the last one ends and the passage runs together.
       */
-      gap = setTimeout(resolve, pauseAfter(utterance.text))
+      gap = setTimeout(resolve, pauseAfter(utterance.text) * (utterance.pauseScale ?? 1))
     })
   })
 

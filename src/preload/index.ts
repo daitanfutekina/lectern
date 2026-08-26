@@ -3,6 +3,7 @@ import type { LibraryIndex } from '@shared/library'
 import type { Bookmark, ChapterProgress, LibraryProgress, ReadingPosition } from '@shared/progress'
 import type { Flag, FlagStore } from '@shared/flags'
 import type { PiperVoice, VoiceShape } from '@shared/voice'
+import type { Settings } from '@shared/settings'
 
 /**
  * The bridge. SPEC section 10.
@@ -74,6 +75,15 @@ const api = {
     /** Register a book's macros before converting any of its equations. */
     configure: (macros: Readonly<Record<string, string>>): Promise<void> =>
       ipcRenderer.invoke('math:configure', macros)
+  },
+
+  settings: {
+    get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+    /** Apply a change; the whole record comes back revalidated. */
+    set: (change: Partial<Settings>): Promise<Settings> =>
+      ipcRenderer.invoke('settings:set', change),
+    /** Open the library folder in the file manager. */
+    reveal: (): Promise<void> => ipcRenderer.invoke('settings:reveal')
   },
 
   voice: {

@@ -10,6 +10,7 @@ import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './f
 import { watchLibrary } from './watch'
 import { addDocuments, configureDocuments, livingDocuments } from './documents'
 import { configurePiper, listVoices, speak as speakPiper } from './piper'
+import { configureSettings, loadSettings, saveSettings } from './settings'
 import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { flagId, type Flag, type FlagKind } from '@shared/flags'
 import {
@@ -166,6 +167,7 @@ app.whenReady().then(() => {
   configureFlags(root())
   configureDocuments(root())
   configurePiper(root())
+  configureSettings(root())
   serveRenderer()
 
   ipcMain.handle('library:get', () => library())
@@ -186,6 +188,17 @@ app.whenReady().then(() => {
       )
       .slice(0, 2000)
     return speakMath(cleaned)
+  })
+
+  ipcMain.handle('settings:get', () => loadSettings())
+
+  ipcMain.handle('settings:set', async (_event, change: unknown) => {
+    if (typeof change !== 'object' || change === null) return loadSettings()
+    return saveSettings(change as Record<string, never>)
+  })
+
+  ipcMain.handle('settings:reveal', async () => {
+    await shell.openPath(root())
   })
 
   ipcMain.handle('voice:list', () => listVoices())

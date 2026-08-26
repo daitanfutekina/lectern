@@ -26,6 +26,8 @@ import {
 } from './blocks'
 import { Reader, onVoicesChanged, voices } from './speech'
 import { voiceFolder, voices as neuralVoices } from './neural-voice'
+import { renderSettings } from './settings-view'
+import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
 import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { hasCover, renderHome, setCover } from './home'
@@ -55,6 +57,9 @@ let restoring = false
 /** Flags in the library, and the paragraph currently being flagged. */
 let flags: readonly Flag[] = []
 let flagging: HTMLElement | null = null
+
+/** Everything the reader can change, loaded once at startup. */
+let settings: Settings = DEFAULT_SETTINGS
 
 /** How the shelf is ordered, remembered between sessions. */
 let shelfSort: ShelfSort = readStoredSort()
@@ -1030,6 +1035,78 @@ function announce(message: string): void {
   }, 4000)
 }
 
+/* ── Settings ────────────────────────────────────────────────────────── */
+
+async function showSettings(): Promise<void> {
+  const container = el<HTMLElement>('content')
+  if (!container) return
+
+  cancelScan()
+  reader.stop()
+  current = null
+  document.body.classList.add('is-home')
+
+  renderSidebar()
+  renderNav(null, null)
+
+  renderSettings(container, {
+    settings,
+    neuralVoices: await neuralVoices(),
+    systemVoices: speechSynthesis.getVoices().map((voice) => ({
+      name: voice.name,
+      lang: voice.lang
+    })),
+    voicesFolder: await voiceFolder(),
+    onChange: (change) => {
+      void window.lectern.settings.set(change).then((updated) => {
+        settings = updated
+        applySettings()
+        // Re-rendered so every readout reflects what was actually stored,
+        // which is not always what was asked for -- the ranges are clamped.
+        void showSettings()
+      })
+    },
+    onReveal: () => void window.lectern.settings.reveal(),
+    onRescan: () => void load(true).then(showHome),
+    onExportIndex: (done) => void window.lectern.flags.exportIndex().then(done),
+    onPreview: (text) => {
+      // Spoken through the real reader so the preview is the thing being
+      // configured rather than an approximation of it.
+      reader.load(
+        [
+          {
+            text,
+            element: container,
+            source: text,
+            map: [],
+            offset: 0,
+            kind: 'paragraph' as const
+          }
+        ],
+        0
+      )
+      reader.play()
+    }
+  })
+}
+
+/** Push settings into the parts of the application that read them. */
+function applySettings(): void {
+  const root = document.documentElement
+  root.style.setProperty('--font-size-scale', String(settings.fontScale))
+  root.style.setProperty('--measure', `${settings.measure}ch`)
+
+  reader.setRate(settings.rate)
+  reader.setShape(settings.shape)
+  reader.setPauseScale(settings.pauseScale)
+  if (settings.neural && settings.voiceId) reader.setNeuralVoice(settings.voiceId)
+  else if (!settings.neural && settings.voiceId) {
+    reader.setNeuralVoice(null)
+    reader.setVoice(settings.voiceId)
+  }
+  shelfSort = settings.sort
+}
+
 /* ── Startup ─────────────────────────────────────────────────────────── */
 
 async function load(rescan = false): Promise<void> {
@@ -1070,7 +1147,7 @@ async function start(): Promise<void> {
   })
 
   el<HTMLButtonElement>('home')?.addEventListener('click', showHome)
-  el<HTMLButtonElement>('rescan')?.addEventListener('click', () => void load(true).then(showHome))
+  el<HTMLButtonElement>('settings')?.addEventListener('click', () => void showSettings())
 
   const collapse = el<HTMLButtonElement>('collapse')
   collapse?.addEventListener('click', () => {
@@ -1080,20 +1157,6 @@ async function start(): Promise<void> {
     // The PDF is fitted to the pane, so the pane changing width means the page
     // has to be laid out again.
     if (pdfView) void pdfView.setZoom(pdfView.zoom())
-  })
-
-  // Writes INDEX.md: every book, chapter and heading in one file, so "have I
-  // covered eigenvalues" can be answered by reading one thing rather than
-  // walking 220.
-  el<HTMLButtonElement>('export-index')?.addEventListener('click', () => {
-    const button = el<HTMLButtonElement>('export-index')
-    void window.lectern.flags.exportIndex().then((path) => {
-      if (!button) return
-      button.textContent = path ? 'Written' : 'Failed'
-      setTimeout(() => {
-        button.textContent = 'Index'
-      }, 2000)
-    })
   })
 
   document.addEventListener('keydown', (event) => {
@@ -1201,6 +1264,9 @@ async function start(): Promise<void> {
   setUpFlagging()
   setUpDropTarget()
   await setUpPlayer()
+
+  settings = await window.lectern.settings.get()
+  applySettings()
 
   flags = (await window.lectern.flags.get()).flags
   renderFlags()
