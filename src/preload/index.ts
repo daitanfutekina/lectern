@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { LibraryIndex } from '@shared/library'
 import type { Bookmark, ChapterProgress, LibraryProgress, ReadingPosition } from '@shared/progress'
+
 import type { Flag, FlagStore } from '@shared/flags'
 import type { PiperVoice, VoiceShape } from '@shared/voice'
 import type { Settings } from '@shared/settings'
+import type { PrepareProgress } from '@shared/speech-cache'
 
 /**
  * The bridge. SPEC section 10.
@@ -98,11 +100,62 @@ const api = {
       voiceId: string,
       text: string,
       shape: VoiceShape,
-      speed: number
+      speed: number,
+      character?: string | null,
+      semitones?: number
     ): Promise<{ pcm: Int16Array; sampleRate: number } | null> =>
-      ipcRenderer.invoke('voice:speak', voiceId, text, shape, speed),
+      ipcRenderer.invoke('voice:speak', voiceId, text, shape, speed, character, semitones),
     /** Where voices are installed, for the message shown when there are none. */
-    folder: (): Promise<string> => ipcRenderer.invoke('voice:folder')
+    folder: (): Promise<string> => ipcRenderer.invoke('voice:folder'),
+    /**
+     * Character voices installed, and whether the shared models they all run
+     * through are present. Asked together because the settings page has to
+     * distinguish "none installed" from "installed but missing its encoders".
+     */
+    characters: (): Promise<{ names: string[]; ready: boolean; folder: string }> =>
+      ipcRenderer.invoke('voice:characters'),
+
+    /**
+     * Prepare a chapter's sentences in the background.
+     *
+     * The renderer hands over the sentence list because it is the side that
+     * walked the document and knows what will actually be spoken -- including
+     * the equations it turned into words.
+     */
+    prepare: (
+      bookId: string,
+      file: string,
+      sentences: readonly string[],
+      voiceId: string,
+      shape: VoiceShape,
+      speed: number,
+      character: string,
+      semitones: number
+    ): Promise<void> =>
+      ipcRenderer.invoke(
+        'voice:prepare',
+        bookId,
+        file,
+        sentences,
+        voiceId,
+        shape,
+        speed,
+        character,
+        semitones
+      ),
+    cancelPrepare: (): Promise<void> => ipcRenderer.invoke('voice:cancelPrepare'),
+
+    /** How far the background job has got. Fires once per sentence. */
+    onPrepared: (listener: (progress: PrepareProgress) => void): (() => void) => {
+      const handler = (_event: unknown, progress: PrepareProgress): void => listener(progress)
+      ipcRenderer.on('voice:prepared', handler)
+      return () => ipcRenderer.removeListener('voice:prepared', handler)
+    },
+
+    /** Disk used by prepared speech, and a way to reclaim it. */
+    storeSize: (): Promise<{ files: number; bytes: number }> =>
+      ipcRenderer.invoke('voice:storeSize'),
+    clearStore: (): Promise<void> => ipcRenderer.invoke('voice:clearStore')
   },
 
   flags: {

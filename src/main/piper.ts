@@ -26,6 +26,7 @@ import { join } from 'node:path'
  */
 
 import { BOOK_VOICE, type PiperVoice, type VoiceShape } from '@shared/voice'
+import { CONTENT_MODEL, PITCH_MODEL } from '@shared/rvc'
 
 const require = createRequire(import.meta.url)
 
@@ -64,6 +65,54 @@ const voicesDir = (): string => join(root, '.library', 'voices')
  * reader who never asks for a character voice never needs them on disk at all.
  */
 export const characterDir = (): string => join(root, '.library', 'rvc')
+
+/**
+ * Character folders that actually hold a model.
+ *
+ * Read here rather than in the worker, even though the worker is what loads
+ * them: importing the worker to ask a question about a directory would pull the
+ * ONNX runtime into Electron, which is the one thing the worker exists to keep
+ * out of it.
+ */
+export async function listCharacters(): Promise<string[]> {
+  let entries: string[] = []
+  try {
+    entries = await readdir(characterDir())
+  } catch {
+    return []
+  }
+
+  const found: string[] = []
+  for (const name of entries) {
+    try {
+      const path = join(characterDir(), name)
+      if (!(await stat(path)).isDirectory()) continue
+      if ((await readdir(path)).some((file) => file.toLowerCase().endsWith('.onnx'))) {
+        found.push(name)
+      }
+    } catch {
+      // Not a character as far as the picker is concerned.
+    }
+  }
+  return found
+}
+
+/**
+ * Whether the two shared models every character runs through are present.
+ *
+ * A separate question from whether any characters are installed: they are 700
+ * MB and downloaded separately, so a reader can easily have one without the
+ * other. Offering a voice that would silently do nothing is worse than saying
+ * what is missing.
+ */
+export async function charactersReady(): Promise<boolean> {
+  try {
+    const files = await readdir(characterDir())
+    return files.includes(CONTENT_MODEL) && files.includes(PITCH_MODEL)
+  } catch {
+    return false
+  }
+}
 
 /**
  * Voices present on disk.
@@ -265,10 +314,21 @@ export async function speak(
       active.pending.delete(id)
       resolve(null)
     }
-    // A worker that dies mid-sentence must not leave the reader waiting.
-    setTimeout(() => {
-      if (active.pending.delete(id)) resolve(null)
-    }, 30_000)
+    /*
+      A worker that dies mid-sentence must not leave the reader waiting.
+
+      Conversion gets far longer, because the first sentence in a character
+      voice pays for loading three quarters of a gigabyte of models before it
+      synthesises anything. Cutting that off at thirty seconds would make the
+      feature look broken exactly once per session, which is the worst possible
+      time for it to.
+    */
+    setTimeout(
+      () => {
+        if (active.pending.delete(id)) resolve(null)
+      },
+      character ? 300_000 : 30_000
+    )
   })
 }
 

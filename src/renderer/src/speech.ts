@@ -50,6 +50,13 @@ export class Reader {
   private neuralVoice: string | null = null
   private shape: VoiceShape = BOOK_VOICE
   private pauseScale = 1
+
+  /**
+   * A character voice applied on top of the neural one, and how far to move the
+   * base voice before converting into it.
+   */
+  private character: string | null = null
+  private characterPitch = 0
   private playing_: Playing | null = null
 
   /**
@@ -72,6 +79,17 @@ export class Reader {
     this.emit()
   }
 
+  /**
+   * What the queue will actually say, in order.
+   *
+   * Handed to the background job so it prepares the sentences that get spoken
+   * rather than the ones a second walk of the document would produce -- the two
+   * differ wherever an equation was turned into words.
+   */
+  texts(): string[] {
+    return this.queue.map((utterance) => utterance.text)
+  }
+
   onChange(listener: Listener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -91,6 +109,20 @@ export class Reader {
   /** Choose a neural voice, or pass null to fall back to the system voices. */
   setNeuralVoice(id: string | null): void {
     this.neuralVoice = id
+    if (this.playing) this.restartCurrent()
+    else this.emit()
+  }
+
+  /**
+   * Choose a character voice, or null for none.
+   *
+   * Deliberately not part of `setNeuralVoice`: a character is a conversion
+   * applied to whichever neural voice is speaking, not an alternative to it,
+   * and the base voice still decides the pronunciation and the pacing.
+   */
+  setCharacter(name: string | null, semitones: number): void {
+    this.character = name
+    this.characterPitch = semitones
     if (this.playing) this.restartCurrent()
     else this.emit()
   }
@@ -307,7 +339,15 @@ export class Reader {
     let playing: Playing
     try {
       playing = await speakNeural(
-        { text: utterance.text, voiceId, shape: this.shape, speed: this.rate, pauseScale: this.pauseScale },
+        {
+          text: utterance.text,
+          voiceId,
+          shape: this.shape,
+          speed: this.rate,
+          pauseScale: this.pauseScale,
+          character: this.character,
+          semitones: this.characterPitch
+        },
         (charIndex) => {
           if (this.neuralToken !== token) return
           this.highlightWord(utterance, charIndex, 0)

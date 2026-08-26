@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import * as ort from 'onnxruntime-node'
 import { melFilterbank, resample, stftMagnitude } from '@shared/dsp'
 import {
+  CONTENT_MODEL,
   FRAME_RATE,
+  PITCH_MODEL,
   RMVPE_MEL,
   coarsePitch,
   commonLength,
@@ -75,9 +77,6 @@ const RMVPE_BLOCK = 32
 /** Below this confidence a frame is silence or a consonant, and has no pitch. */
 const VOICED_THRESHOLD = 0.03
 
-const CONTENT_MODEL = 'vec-768-layer-12.onnx'
-const PITCH_MODEL = 'rmvpe.onnx'
-
 /**
  * Half the logical cores, capped.
  *
@@ -115,36 +114,6 @@ export async function loadCharacter(dir: string, name: string): Promise<Characte
   ])
 
   return { content, pitch, voice }
-}
-
-/** Character folders that have a model in them. */
-export function listCharacters(dir: string): string[] {
-  let entries: string[] = []
-  try {
-    entries = readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-  } catch {
-    return []
-  }
-
-  return entries.filter((name) => {
-    try {
-      return readdirSync(join(dir, name)).some((file) => file.toLowerCase().endsWith('.onnx'))
-    } catch {
-      return false
-    }
-  })
-}
-
-/** Whether the shared models a character needs are actually present. */
-export function charactersAvailable(dir: string): boolean {
-  try {
-    const files = readdirSync(dir)
-    return files.includes(CONTENT_MODEL) && files.includes(PITCH_MODEL)
-  } catch {
-    return false
-  }
 }
 
 /* -- The chain ------------------------------------------------------------ */

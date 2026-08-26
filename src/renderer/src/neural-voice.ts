@@ -20,6 +20,10 @@ export interface NeuralUtterance {
   readonly speed: number
   /** Scales the gap after this sentence; 0 runs it into the next. */
   readonly pauseScale?: number
+  /** A character voice to convert into after synthesis, if any. */
+  readonly character?: string | null
+  /** Semitones to move the base voice before converting. */
+  readonly semitones?: number
 }
 
 export interface Playing {
@@ -95,7 +99,9 @@ export async function speak(
     utterance.voiceId,
     utterance.text,
     utterance.shape,
-    utterance.speed
+    utterance.speed,
+    utterance.character ?? null,
+    utterance.semitones ?? 0
   )
 
   if (!result || result.pcm.length === 0) {

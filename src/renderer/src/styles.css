@@ -718,7 +718,15 @@ details.box[open] > summary::before {
 }
 
 /* Background OCR progress. Present only while a scan is being read. */
-#scan-progress {
+/*
+  Two background jobs, one look.
+
+  Recognising a scan and preparing a character voice are the same thing from the
+  reader's side -- work happening under the chapter that they can read through
+  -- so they say so in the same place and the same voice.
+*/
+#scan-progress,
+#prepare-progress {
   padding: 8px 24px;
   border-top: 1px solid var(--border-soft);
   background: var(--bg-callout);
@@ -727,7 +735,8 @@ details.box[open] > summary::before {
   letter-spacing: 0.02em;
 }
 
-#scan-progress[hidden] {
+#scan-progress[hidden],
+#prepare-progress[hidden] {
   display: none;
 }
 

@@ -28,6 +28,22 @@ export interface Settings {
   /** Silence after a sentence, scaled. 1 is the measured default. */
   readonly pauseScale: number
 
+  /*
+    A character voice, applied on top of the neural one.
+
+    Null is the ordinary case. Conversion runs at roughly realtime rather than
+    the twenty times realtime Piper manages, so a chapter in a character voice
+    is prepared ahead of being read rather than spoken on demand -- which is
+    why this is a separate setting and not another entry in the voice list.
+  */
+  readonly character: string | null
+  /**
+   * Semitones to move the base voice before converting. A converter reproduces
+   * timbre but not range, so a voice trained high and given a low pitch track
+   * sounds like that voice straining.
+   */
+  readonly characterPitch: number
+
   /* Mathematics */
   readonly math: GateSettings
 
@@ -49,6 +65,8 @@ export const DEFAULT_SETTINGS: Settings = {
   rate: 1,
   shape: BOOK_VOICE,
   pauseScale: 1,
+  character: null,
+  characterPitch: 0,
   math: DEFAULT_GATE,
   ocrDpi: 300,
   ocrAuto: true,
@@ -96,6 +114,10 @@ export function parseSettings(source: string): Settings {
       noiseW: num(shape['noiseW'], BOOK_VOICE.noiseW, 0, 1)
     }),
     pauseScale: num(raw['pauseScale'], 1, 0, 3),
+    character: typeof raw['character'] === 'string' && raw['character'] ? raw['character'] : null,
+    // An octave either way. Past that the converter is being asked to invent a
+    // register the model has never produced, and it stops sounding like anyone.
+    characterPitch: Math.round(num(raw['characterPitch'], 0, -12, 12)),
     math: {
       maxWords: num(
         isRecord(raw['math']) ? raw['math']['maxWords'] : undefined,

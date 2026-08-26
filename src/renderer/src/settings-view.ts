@@ -19,7 +19,15 @@ export interface SettingsContext {
   readonly neuralVoices: readonly PiperVoice[]
   readonly systemVoices: readonly { name: string; lang: string }[]
   readonly voicesFolder: string
+  readonly characters: {
+    readonly names: readonly string[]
+    /** Whether the shared encoders every character runs through are installed. */
+    readonly ready: boolean
+    readonly folder: string
+  }
+  readonly store: { readonly files: number; readonly bytes: number }
   readonly onChange: (change: Partial<Settings>) => void
+  readonly onClearStore: (done: () => void) => void
   readonly onReveal: () => void
   readonly onRescan: () => void
   readonly onExportIndex: (done: () => void) => void
@@ -168,6 +176,92 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
 
   page.append(section('Voice', voiceControls))
 
+  /* ── Character voice ───────────────────────────────────────────── */
+
+  /*
+    A conversion applied to the neural voice, not an alternative to it.
+
+    It reads as a separate section for that reason: the voice above still
+    decides the pronunciation and the pacing, and this only changes who it
+    sounds like. Presenting it as another entry in the voice list would suggest
+    the two are interchangeable, and would hide that one of them is roughly
+    realtime while the other is twenty times faster.
+  */
+  const characterControls: HTMLElement[] = []
+
+  if (context.characters.names.length === 0) {
+    characterControls.push(
+      note(`No character voice installed. Put one in ${context.characters.folder} to get one.`)
+    )
+  } else if (!context.characters.ready) {
+    characterControls.push(
+      note(
+        `A character voice is installed but the two models it runs through are not. ` +
+          `Both belong in ${context.characters.folder}.`
+      )
+    )
+  } else {
+    const picker = document.createElement('select')
+    picker.className = 'settings-select'
+    picker.append(option('', 'None'))
+    for (const name of context.characters.names) picker.append(option(name, prettyCharacter(name)))
+    picker.value = context.settings.character ?? ''
+    picker.addEventListener('change', () =>
+      context.onChange({ character: picker.value || null })
+    )
+    characterControls.push(row('Character', picker))
+
+    characterControls.push(
+      slider(
+        'Pitch',
+        context.settings.characterPitch,
+        -12,
+        12,
+        1,
+        (value) => context.onChange({ characterPitch: Math.round(value) }),
+        (value) => {
+          const semitones = Math.round(value)
+          if (semitones === 0) return 'unchanged'
+          return `${semitones > 0 ? '+' : ''}${semitones} semitone${Math.abs(semitones) === 1 ? '' : 's'}`
+        }
+      )
+    )
+
+    /*
+      What preparing a chapter has cost so far, and a way to reclaim it.
+
+      The store has no size limit on purpose: throwing away a sentence that took
+      a second of real work to make, to save a few kilobytes, is the wrong
+      trade. But that means it only ever grows, so the reader is told how large
+      it is and can empty it.
+    */
+    const used = text(describeStore(context.store))
+    const clear = document.createElement('button')
+    clear.type = 'button'
+    clear.className = 'settings-button'
+    clear.textContent = 'Clear prepared speech'
+    clear.addEventListener('click', () => {
+      clear.textContent = 'Clearing…'
+      context.onClearStore(() => {
+        used.textContent = describeStore({ files: 0, bytes: 0 })
+        clear.textContent = 'Clear prepared speech'
+      })
+    })
+
+    characterControls.push(row('Prepared', used), row('', clear))
+
+    characterControls.push(
+      note(
+        'Conversion reproduces a voice but not its range, so a base voice far ' +
+          'below the character sounds strained until it is moved up. It runs at ' +
+          'about the speed of speech rather than twenty times faster, so a ' +
+          'chapter is prepared in the background before it is read, and kept.'
+      )
+    )
+  }
+
+  page.append(section('Character voice', characterControls))
+
   /* ── Mathematics ───────────────────────────────────────────────── */
 
   page.append(
@@ -272,6 +366,22 @@ function el<K extends keyof HTMLElementTagNameMap>(
 const heading = (label: string): HTMLElement => el('h2', 'settings-title', label)
 const text = (value: string): HTMLElement => el('span', 'settings-value', value)
 const note = (value: string): HTMLElement => el('p', 'settings-note', value)
+
+/** "412 sentences, 74 MB", or plain English when there are none. */
+function describeStore(store: { files: number; bytes: number }): string {
+  if (store.files === 0) return 'nothing prepared yet'
+  const mb = store.bytes / 1048576
+  const size = mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`
+  return `${store.files} sentence${store.files === 1 ? '' : 's'}, ${size}`
+}
+
+/** A folder name is a folder name; `kasane-teto` reads better as `Kasane Teto`. */
+function prettyCharacter(name: string): string {
+  return name
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
 
 function option(value: string, label: string): HTMLOptionElement {
   const node = document.createElement('option')

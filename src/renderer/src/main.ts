@@ -34,6 +34,7 @@ import { hasCover, renderHome, setCover } from './home'
 import { isShelfSort, type ShelfSort } from '@shared/shelf'
 import { pdfCover, renderBook, type PdfView } from './pdf-view'
 import { renderEpub } from './epub-view'
+import type { PrepareProgress } from '@shared/speech-cache'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
 import { mathUtterance } from '@shared/math-gate'
 
@@ -444,6 +445,7 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   const blockAt = Math.min(target.block, rendered.children.length - 1)
   const nearest = rendered.children[Math.max(0, blockAt)]
   reader.load(utterances, nearest instanceof HTMLElement ? reader.indexNear(nearest) : 0)
+  startPreparing()
 
   // Equations are converted after the queue exists and after the chapter is on
   // screen. It is a slow batch, and making the reader wait for it would trade
@@ -512,6 +514,8 @@ async function fillMathSpeech(
   const resumeAt = reader.state.index
   const rebuilt = withMathSpeech(extract(body), displaySpeech)
   reader.load(rebuilt, Math.min(resumeAt, Math.max(0, rebuilt.length - 1)))
+  // The equations are words now, so what has to be prepared has changed.
+  startPreparing()
 }
 
 /**
@@ -592,6 +596,7 @@ function rebuildPdfQueue(): void {
     const utterances = ordered.flatMap(([, layer]) => extract(layer.parentElement ?? layer))
     const at = Math.min(reader.state.index, Math.max(0, utterances.length - 1))
     reader.load(utterances, at)
+    startPreparing()
   }, 300)
 }
 
@@ -645,6 +650,7 @@ async function openEpubChapter(
   // Node type, not `instanceof`: the frame is its own realm (see `blockTops`).
   const nearest = rendered.body.children[Math.max(0, blockAt)]
   reader.load(utterances, nearest ? reader.indexNear(nearest as HTMLElement) : 0)
+  startPreparing()
   renderFlags()
 }
 
@@ -783,6 +789,58 @@ function setUpFlagging(): void {
     event.preventDefault()
     openFlagBar(paragraph)
   })
+}
+
+/* ── Preparing a character voice ─────────────────────────────────────── */
+
+/**
+ * Start preparing the open chapter, if a character voice is chosen.
+ *
+ * The sentence list comes from the reader's own queue rather than from the
+ * document: the queue is what will actually be spoken, equations included, and
+ * preparing anything else would prepare sentences that are never played and
+ * miss the ones that are.
+ */
+function startPreparing(): void {
+  const bar = el<HTMLElement>('prepare-progress')
+
+  if (!settings.character || !settings.neural || !settings.voiceId || !current) {
+    void window.lectern.voice.cancelPrepare()
+    if (bar) bar.hidden = true
+    return
+  }
+
+  const sentences = reader.texts()
+  if (sentences.length === 0) return
+
+  void window.lectern.voice.prepare(
+    current.bookId,
+    current.file,
+    sentences,
+    settings.voiceId,
+    settings.shape,
+    settings.rate,
+    settings.character,
+    settings.characterPitch
+  )
+}
+
+function renderPrepareProgress(progress: PrepareProgress): void {
+  const bar = el<HTMLElement>('prepare-progress')
+  if (!bar) return
+
+  // Only for the chapter on screen. A job that was cancelled mid-sentence can
+  // still deliver one last report for the chapter the reader has just left.
+  if (!current || progress.bookId !== current.bookId || progress.file !== current.file) return
+
+  bar.hidden = !progress.running && progress.done >= progress.total
+  const failed = progress.failed > 0 ? `, ${progress.failed} unreadable` : ''
+  bar.textContent = progress.running
+    ? `Preparing the voice: ${progress.done} of ${progress.total} sentences${failed}`
+    : `Voice ready: ${progress.total} sentences${failed}`
+
+  // The finished message is worth a moment and then it is clutter.
+  if (!progress.running) setTimeout(() => (bar.hidden = true), 4000)
 }
 
 /* ── Scanned pages ───────────────────────────────────────────────────── */
@@ -1174,6 +1232,11 @@ async function showSettings(): Promise<void> {
       lang: voice.lang
     })),
     voicesFolder: await voiceFolder(),
+    characters: await characterList(),
+    store: await storeSize(),
+    onClearStore: (done) => {
+      void window.lectern.voice.clearStore().then(() => done())
+    },
     onChange: (change) => {
       void window.lectern.settings.set(change).then((updated) => {
         settings = updated
@@ -1216,12 +1279,40 @@ function applySettings(): void {
   reader.setRate(settings.rate)
   reader.setShape(settings.shape)
   reader.setPauseScale(settings.pauseScale)
+  reader.setCharacter(settings.character, settings.characterPitch)
+  // Every one of those changes what the stored audio would have to be, so the
+  // job starts again rather than finishing a chapter nobody will hear.
+  startPreparing()
   if (settings.neural && settings.voiceId) reader.setNeuralVoice(settings.voiceId)
   else if (!settings.neural && settings.voiceId) {
     reader.setNeuralVoice(null)
     reader.setVoice(settings.voiceId)
   }
   shelfSort = settings.sort
+}
+
+/**
+ * Character voices, or an empty list when the bridge is unavailable.
+ *
+ * Settings must render whatever happens here: a missing folder is the ordinary
+ * case for a reader who has never wanted a character voice, and it is not a
+ * reason to fail to draw the page.
+ */
+async function characterList(): Promise<{ names: string[]; ready: boolean; folder: string }> {
+  try {
+    return await window.lectern.voice.characters()
+  } catch {
+    return { names: [], ready: false, folder: '' }
+  }
+}
+
+/** How much disk prepared speech is using, or nothing when unavailable. */
+async function storeSize(): Promise<{ files: number; bytes: number }> {
+  try {
+    return await window.lectern.voice.storeSize()
+  } catch {
+    return { files: 0, bytes: 0 }
+  }
 }
 
 /* ── Startup ─────────────────────────────────────────────────────────── */
@@ -1355,6 +1446,8 @@ async function start(): Promise<void> {
   // flushes them on quit, so this only has to make sure the position it flushes
   // is the one the reader stopped at.
   window.addEventListener('beforeunload', recordHere)
+
+  window.lectern.voice.onPrepared(renderPrepareProgress)
 
   ;[index, progress] = await Promise.all([
     window.lectern.library.get(),

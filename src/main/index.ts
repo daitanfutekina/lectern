@@ -9,8 +9,24 @@ import { cachedPages, configureOcrCache, documentKey, readRange, writePage } fro
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
 import { watchLibrary } from './watch'
 import { addDocuments, configureDocuments, livingDocuments } from './documents'
-import { configurePiper, listVoices, speak as speakPiper } from './piper'
+import {
+  characterDir,
+  charactersReady,
+  configurePiper,
+  listCharacters,
+  listVoices,
+  speak as speakPiper
+} from './piper'
 import { configureSettings, loadSettings, saveSettings } from './settings'
+import { cancelPrepare, prepareChapter } from './prepare'
+import {
+  clearSpeechStore,
+  configureSpeechStore,
+  readSpeech,
+  speechStoreSize,
+  writeSpeech
+} from './speech-store'
+import type { SpeechRequest } from '@shared/speech-cache'
 import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { flagId, type Flag, type FlagKind } from '@shared/flags'
 import {
@@ -168,6 +184,7 @@ app.whenReady().then(() => {
   configureDocuments(root())
   configurePiper(root())
   configureSettings(root())
+  configureSpeechStore(root())
   serveRenderer()
 
   ipcMain.handle('library:get', () => library())
@@ -204,19 +221,118 @@ app.whenReady().then(() => {
   ipcMain.handle('voice:list', () => listVoices())
   ipcMain.handle('voice:folder', () => join(root(), '.library', 'voices'))
 
+  /*
+    Character voices are reported as a list of names, and as whether the two
+    shared models they all need are actually on disk. Those are separate
+    questions: a reader can have unpacked a character and not the 700 MB of
+    encoders it runs through, and the settings page should say so rather than
+    offer a voice that will silently do nothing.
+  */
+  /*
+    Prepare a chapter ahead of reading it.
+
+    The renderer owns the sentence split -- it is the one that walked the
+    document and knows what will actually be spoken, including the equations it
+    turned into words -- so it hands the list over rather than having the main
+    process guess at it a second time.
+  */
+  ipcMain.handle(
+    'voice:prepare',
+    (
+      _event,
+      bookId: unknown,
+      file: unknown,
+      sentences: unknown,
+      voiceId: unknown,
+      shape: unknown,
+      speed: unknown,
+      character: unknown,
+      semitones: unknown
+    ) => {
+      if (typeof bookId !== 'string' || typeof file !== 'string') return
+      if (!Array.isArray(sentences) || typeof voiceId !== 'string') return
+      if (typeof character !== 'string' || !character) return
+
+      prepareChapter(
+        bookId,
+        file,
+        sentences.filter((line): line is string => typeof line === 'string' && line.trim().length > 0),
+        {
+          voiceId,
+          shape: clampShape(shape && typeof shape === 'object' ? (shape as VoiceShape) : BOOK_VOICE),
+          speed:
+            typeof speed === 'number' && Number.isFinite(speed)
+              ? Math.min(Math.max(speed, 0.5), 3)
+              : 1,
+          character,
+          semitones:
+            typeof semitones === 'number' && Number.isFinite(semitones)
+              ? Math.round(Math.min(Math.max(semitones, -12), 12))
+              : 0
+        }
+      )
+    }
+  )
+
+  ipcMain.handle('voice:cancelPrepare', () => cancelPrepare())
+  ipcMain.handle('voice:storeSize', () => speechStoreSize())
+  ipcMain.handle('voice:clearStore', () => clearSpeechStore())
+
+  ipcMain.handle('voice:characters', async () => ({
+    names: await listCharacters(),
+    ready: await charactersReady(),
+    folder: characterDir()
+  }))
+
   ipcMain.handle(
     'voice:speak',
-    async (_event, voiceId: unknown, text: unknown, shape: unknown, speed: unknown) => {
+    async (
+      _event,
+      voiceId: unknown,
+      text: unknown,
+      shape: unknown,
+      speed: unknown,
+      character: unknown,
+      semitones: unknown
+    ) => {
       if (typeof voiceId !== 'string' || typeof text !== 'string' || !text.trim()) return null
 
-      const asked = shape && typeof shape === 'object' ? (shape as VoiceShape) : BOOK_VOICE
-      const result = await speakPiper(
-        voiceId,
+      const request: SpeechRequest = {
         text,
-        clampShape(asked),
-        typeof speed === 'number' && Number.isFinite(speed) ? Math.min(Math.max(speed, 0.5), 3) : 1
+        voiceId,
+        shape: clampShape(shape && typeof shape === 'object' ? (shape as VoiceShape) : BOOK_VOICE),
+        speed:
+          typeof speed === 'number' && Number.isFinite(speed)
+            ? Math.min(Math.max(speed, 0.5), 3)
+            : 1,
+        character: typeof character === 'string' && character ? character : null,
+        semitones:
+          typeof semitones === 'number' && Number.isFinite(semitones)
+            ? Math.round(Math.min(Math.max(semitones, -12), 12))
+            : 0
+      }
+
+      /*
+        The store first.
+
+        A prepared chapter is entirely made of hits, which is the whole point of
+        preparing it: reading a sentence off disk is instant, and converting one
+        takes about as long as saying it.
+      */
+      const stored = await readSpeech(request)
+      if (stored) return { pcm: stored.pcm, sampleRate: stored.sampleRate }
+
+      const result = await speakPiper(
+        request.voiceId,
+        request.text,
+        request.shape,
+        request.speed,
+        request.character ? { name: request.character, semitones: request.semitones } : undefined
       )
       if (!result) return null
+      // Kept, so the next time through this sentence is free. Not awaited: the
+      // reader is waiting on the audio, not on the disk.
+      void writeSpeech(request, result)
       // Structured clone carries a typed array across intact, so the samples do
       // not have to be copied into a plain array on the way.
       return { pcm: result.pcm, sampleRate: result.sampleRate }
@@ -517,6 +633,15 @@ LIVE-RELOAD-MARKER
     shelfCards: document.querySelectorAll('.shelf-card').length,
     shelfIds: [...document.querySelectorAll('.shelf-card')].map((c) => c.dataset.book).slice(0, 6),
     flagCount: document.querySelectorAll('.flag').length,
+    prepareBar: document.querySelector('#prepare-progress')?.textContent || null,
+    prepareHidden: document.querySelector('#prepare-progress')?.hidden ?? null,
+    // The settings page, read from the controls themselves rather than from
+    // what we believe we rendered.
+    settingsGroups: [...document.querySelectorAll('.settings-heading')].map((h) => h.textContent),
+    settingsRows: [...document.querySelectorAll('.settings-label')].map((l) => l.textContent),
+    characterOptions: [...document.querySelectorAll('.settings-select')]
+      .map((s) => [...s.options].map((o) => o.value))
+      .find((values) => values.includes('')) ?? null,
     // Whether a scrollbar is actually visible, not whether the content is
     // wider than the box -- an element hiding its overflow reports the second
     // and shows neither, which had this reporting a bug that was not there.

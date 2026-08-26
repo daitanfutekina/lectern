@@ -17,6 +17,17 @@
  *   both, plus a speaker id           ->  RVC  ->  the same words in another voice
  */
 
+/**
+ * The two models every character shares, by file name.
+ *
+ * Named here rather than in the worker because the main process has to check
+ * whether they are on disk, and it must not import the worker to do it: that
+ * would pull the ONNX runtime into Electron, which is exactly what the worker
+ * exists to keep out.
+ */
+export const CONTENT_MODEL = 'vec-768-layer-12.onnx'
+export const PITCH_MODEL = 'rmvpe.onnx'
+
 /* -- The spectrogram RMVPE expects ---------------------------------------- */
 
 /**
