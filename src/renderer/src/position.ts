@@ -9,13 +9,34 @@ import { positionAt, scrollTopFor, type ReadingPosition } from '@shared/progress
  * survive a resize, a font change, or a chapter being edited between sessions.
  */
 
-/** Each block's top, relative to the scroll container's content. */
+/**
+ * Each block's top, relative to the scroll container's content.
+ *
+ * `body` may be the body of an EPUB's frame, which costs two things.
+ *
+ * Membership is decided by node type rather than `instanceof HTMLElement`: a
+ * frame is a separate realm with its own constructors, and that check silently
+ * rejects every element inside one.
+ *
+ * And a rect measured inside a frame is relative to *that* frame's viewport,
+ * not this document's. The frame does not scroll internally, so those rects do
+ * not move when the page scrolls -- which made every measured top drift by
+ * exactly the scroll offset, and a position recorded at one offset restore to a
+ * different place. Adding the frame's own position converts them into this
+ * document's coordinates, where the rest of the arithmetic already lives.
+ */
 export function blockTops(container: HTMLElement, body: HTMLElement): number[] {
   const base = container.getBoundingClientRect().top - container.scrollTop
+  const frame =
+    body.ownerDocument === container.ownerDocument
+      ? null
+      : body.ownerDocument.defaultView?.frameElement
+  const offset = frame ? frame.getBoundingClientRect().top : 0
+
   const tops: number[] = []
   for (const child of Array.from(body.children)) {
-    if (!(child instanceof HTMLElement)) continue
-    tops.push(Math.round(child.getBoundingClientRect().top - base))
+    if (child.nodeType !== 1) continue
+    tops.push(Math.round(child.getBoundingClientRect().top + offset - base))
   }
   return tops
 }

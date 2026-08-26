@@ -54,6 +54,12 @@ let current: { bookId: string; file: string } | null = null
  */
 let restoring = false
 
+/**
+ * The open EPUB's document body, which lives inside the frame and so cannot be
+ * found with a selector on this document.
+ */
+let epubBody: HTMLElement | null = null
+
 /** Flags in the library, and the paragraph currently being flagged. */
 let flags: readonly Flag[] = []
 let flagging: HTMLElement | null = null
@@ -107,6 +113,64 @@ const bookProgress = (bookId: string) => progress.books[bookId] ?? EMPTY_BOOK
 
 function chapterBody(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.chapter-body')
+}
+
+/**
+ * The element whose children are the blocks a reading position anchors to.
+ *
+ * Not the same thing as `chapterBody`, which is one of our own chapters and
+ * nothing else. Every format has blocks worth anchoring to -- a PDF's blocks
+ * are its pages, an EPUB's are the publisher's paragraphs -- and keying
+ * position tracking to `.chapter-body` alone meant a PDF or an EPUB recorded no
+ * position at all: the tracker looked for an element those views never create,
+ * found nothing, and returned before measuring anything.
+ */
+function positionBody(): HTMLElement | null {
+  return (
+    chapterBody() ??
+    document.querySelector<HTMLElement>('.pdf-pages') ??
+    epubBody
+  )
+}
+
+/** Hand a position to the main process and fold the answer back into the index. */
+function record(position: ReadingPosition, blocks: number): void {
+  if (!current || restoring) return
+  const { bookId, file } = current
+
+  void window.lectern.progress.record(bookId, file, position, blocks).then((updated) => {
+    if (!updated) return
+    const stored = bookProgress(bookId)
+    progress = {
+      ...progress,
+      lastBook: bookId,
+      books: {
+        ...progress.books,
+        [bookId]: {
+          ...stored,
+          lastChapter: file,
+          chapters: { ...stored.chapters, [file]: updated }
+        }
+      }
+    }
+    renderSidebar()
+  })
+}
+
+/**
+ * Record where the reader is right now, rather than waiting for a scroll.
+ *
+ * Position tracking is driven by the scroll event, which is the right trigger
+ * while reading and the wrong one at the moment of leaving: stopping on a page
+ * and then closing the window or going back to the shelf produces no scroll at
+ * all, so the last thing recorded would be wherever the reader last moved
+ * through rather than where they stopped.
+ */
+function recordHere(): void {
+  const container = el<HTMLElement>('content')
+  const body = positionBody()
+  if (!container || !body) return
+  record(currentPosition(container, body), blockCount(body))
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
@@ -315,6 +379,9 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   if (!book || !chapter) return
 
   restoring = true
+  // The previous chapter's frame is about to be replaced, and a stale body
+  // would have position tracking measuring a document that is no longer shown.
+  epubBody = null
   document.body.classList.remove('is-home')
   current = { bookId, file }
   renderSidebar()
@@ -330,12 +397,12 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   // A PDF is shown as a PDF and an EPUB keeps its own typography. Only our own
   // books go through the Markdown pipeline and wear the application's design.
   if (book.format === 'pdf') {
-    await openPdfChapter(container, book, chapter)
+    await openPdfChapter(container, book, chapter, at)
     restoring = false
     return
   }
   if (book.format === 'epub') {
-    await openEpubChapter(container, book, chapter, source)
+    await openEpubChapter(container, book, chapter, source, at)
     restoring = false
     return
   }
@@ -457,7 +524,8 @@ async function fillMathSpeech(
 async function openPdfChapter(
   container: HTMLElement,
   book: Book,
-  chapter: Chapter
+  chapter: Chapter,
+  at?: ReadingPosition
 ): Promise<void> {
   const range = /^p(\d+)-(\d+)$/.exec(chapter.file)
   const target = range ? Number(range[1]) : 1
@@ -487,7 +555,22 @@ async function openPdfChapter(
     rebuildPdfQueue()
   })
 
-  if (pdfView && target > 1) pdfView.goToPage(target)
+  if (!pdfView) return
+
+  /*
+    Where the reader was, in preference to where the chapter starts.
+
+    Every page has a correctly-sized placeholder by now, so the page wrappers
+    are already in their final positions and anchoring works before a single
+    page has been drawn -- scrolling to the stored position is what then tells
+    the virtualiser which pages to draw.
+  */
+  const stored = at ?? bookProgress(book.id).chapters[chapter.file]?.position
+  if (stored && (stored.block > 0 || stored.within > 0)) {
+    restorePosition(container, pages, stored)
+  } else if (target > 1) {
+    pdfView.goToPage(target)
+  }
 }
 
 /**
@@ -517,10 +600,9 @@ async function openEpubChapter(
   container: HTMLElement,
   book: Book,
   chapter: Chapter,
-  html: string
+  html: string,
+  at?: ReadingPosition
 ): Promise<void> {
-  void book
-  void chapter
   const host = element('div', 'epub-host')
   container.replaceChildren(host)
   container.scrollTop = 0
@@ -531,9 +613,38 @@ async function openEpubChapter(
     return
   }
 
+  epubBody = rendered.body
+
+  const stored = at ?? bookProgress(book.id).chapters[chapter.file]?.position ?? START
+  restorePosition(container, rendered.body, stored)
+
+  /*
+    And again once the book has finished arriving.
+
+    The frame is sized to its content at parse time, but images and web fonts
+    land afterwards and move every paragraph below them, so the first restore
+    anchors against geometry that is about to change underneath it.
+
+    The guard is the scroll offset rather than a scroll listener. Setting
+    `scrollTop` fires a scroll event of its own, which a listener attached here
+    cannot tell apart from the reader's -- so the first version of this cancelled
+    itself every time and left the position visibly short. Content settling moves
+    the paragraphs but not the viewport, so an offset that has not changed means
+    the reader has not moved.
+  */
+  const placed = container.scrollTop
+  setTimeout(() => {
+    if (Math.abs(container.scrollTop - placed) > 2) return
+    restorePosition(container, rendered.body, stored)
+  }, 1400)
+
   // The frame is same-origin, so the speech walk reaches straight into it and
   // every downstream feature works unchanged.
-  reader.load(extract(rendered.body), 0)
+  const utterances = extract(rendered.body)
+  const blockAt = Math.min(stored.block, rendered.body.children.length - 1)
+  // Node type, not `instanceof`: the frame is its own realm (see `blockTops`).
+  const nearest = rendered.body.children[Math.max(0, blockAt)]
+  reader.load(utterances, nearest ? reader.indexNear(nearest as HTMLElement) : 0)
   renderFlags()
 }
 
@@ -879,11 +990,17 @@ function showHome(): void {
   const container = el<HTMLElement>('content')
   if (!container) return
 
+  // Before anything is torn down. The tracker only fires on scroll, so a reader
+  // who stops on a page and goes straight to the shelf would otherwise leave
+  // the position recorded at wherever they last happened to move.
+  recordHere()
+
   cancelScan()
   pdfView?.destroy()
   pdfView = null
   pdfBookId = null
   pdfPages.clear()
+  epubBody = null
   reader.stop()
   current = null
 
@@ -1231,29 +1348,13 @@ async function start(): Promise<void> {
   })
 
   if (container) {
-    trackPosition(container, chapterBody, (position, blocks) => {
-      if (!current || restoring) return
-      void window.lectern.progress
-        .record(current.bookId, current.file, position, blocks)
-        .then((updated) => {
-          if (!updated || !current) return
-          const stored = bookProgress(current.bookId)
-          progress = {
-            ...progress,
-            lastBook: current.bookId,
-            books: {
-              ...progress.books,
-              [current.bookId]: {
-                ...stored,
-                lastChapter: current.file,
-                chapters: { ...stored.chapters, [current.file]: updated }
-              }
-            }
-          }
-          renderSidebar()
-        })
-    })
+    trackPosition(container, positionBody, record)
   }
+
+  // The last word before the window goes. The main process debounces writes and
+  // flushes them on quit, so this only has to make sure the position it flushes
+  // is the one the reader stopped at.
+  window.addEventListener('beforeunload', recordHere)
 
   ;[index, progress] = await Promise.all([
     window.lectern.library.get(),

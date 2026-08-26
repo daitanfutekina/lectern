@@ -407,11 +407,29 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
   })
 
   /*
-    Optional second half of the hook: scroll somewhere, then quit. Resuming is
-    the whole point of M2 and cannot be verified in one run -- it needs a
-    session that reads and leaves, and a second that comes back. The wait after
-    scrolling is longer than the progress debounce, so the position is recorded
-    the way it would be for a real reader.
+    Click, then scroll, in that order.
+
+    They used to run the other way round, which made the one sequence a resume
+    test actually needs -- open a book, read into it, leave -- impossible to
+    express: the scroll landed on the shelf and the book opened at the top
+    afterwards. Nothing wants to scroll before clicking.
+  */
+  const click = process.env['LECTERN_CLICK']
+  if (click) {
+    await window.webContents.executeJavaScript(
+      `document.querySelector(${JSON.stringify(click)})?.click()`
+    )
+    const settle = Number(process.env['LECTERN_WAIT'] ?? '') || 1200
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), settle)
+    })
+  }
+
+  /*
+    Scroll somewhere, then quit. Resuming cannot be verified in one run -- it
+    needs a session that reads and leaves, and a second that comes back. The
+    wait after scrolling is longer than the progress debounce, so the position
+    is recorded the way it would be for a real reader.
   */
   const scrollTo = Number(process.env['LECTERN_SCROLL'] ?? '')
   if (Number.isFinite(scrollTo) && scrollTo > 0) {
@@ -423,15 +441,16 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
     })
   }
 
-  // Click something before capturing, for verifying a milestone's controls.
-  const click = process.env['LECTERN_CLICK']
-  if (click) {
+  // A click *after* the scroll, which is what leaving a book looks like: read
+  // into it, then press Library. Whether the position survives that is a
+  // separate question from whether it survives quitting.
+  const thenClick = process.env['LECTERN_CLICK_AFTER']
+  if (thenClick) {
     await window.webContents.executeJavaScript(
-      `document.querySelector(${JSON.stringify(click)})?.click()`
+      `document.querySelector(${JSON.stringify(thenClick)})?.click()`
     )
-    const settle = Number(process.env['LECTERN_WAIT'] ?? '') || 1200
     await new Promise<void>((resolve) => {
-      setTimeout(() => resolve(), settle)
+      setTimeout(() => resolve(), 1600)
     })
   }
 
@@ -520,6 +539,16 @@ LIVE-RELOAD-MARKER
     // widths and are clipped, so measuring them says nothing.
     scrollTop: Math.round(document.querySelector('#content')?.scrollTop ?? -1),
     blocks: document.querySelector('.chapter-body')?.children.length ?? 0,
+    // What a reading position is anchored to in whichever view is open. Zero
+    // here means positions are not being recorded at all, which is exactly the
+    // state PDFs and EPUBs were in.
+    anchorBlocks: (() => {
+      const b =
+        document.querySelector('.chapter-body') ||
+        document.querySelector('.pdf-pages') ||
+        document.querySelector('.epub-frame')?.contentDocument?.body;
+      return b ? b.children.length : 0;
+    })(),
     // What the reader is actually looking at. Comparing this across window
     // widths is the real test of the anchoring; comparing scrollTop is not.
     atTop: (() => {
