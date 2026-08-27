@@ -1171,10 +1171,21 @@ async function loadCovers(): Promise<void> {
   for (const book of index.books) {
     if (hasCover(book.id)) continue
 
-    if (book.format === 'epub') {
-      const cover = await window.lectern.library.cover(book.id)
-      if (cover) setCover(book.id, cover)
-    } else if (book.format === 'pdf') {
+    /*
+      An image beside the book first, whatever the format.
+
+      A PDF has a first page and an EPUB carries its own cover, but our own
+      books are folders of Markdown with nothing to extract -- and a `cover.png`
+      dropped in the folder should win for any of them, because a reader who put
+      one there meant it.
+    */
+    const beside = await window.lectern.library.cover(book.id)
+    if (beside) {
+      setCover(book.id, beside)
+      continue
+    }
+
+    if (book.format === 'pdf') {
       const cover = await pdfCover(book.id)
       if (cover) setCover(book.id, cover)
     }

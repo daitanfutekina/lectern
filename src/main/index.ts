@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { DEFAULT_ROOT, readChapterSource, saveIndex, scanLibrary } from './library'
+import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
 import { configureMath, speakMath } from './math-speech'
 import { pdfBytes } from './pdf'
 import { epubCover } from './epub'
@@ -456,7 +456,24 @@ app.whenReady().then(() => {
   ipcMain.handle('library:cover', async (_event, bookId: unknown) => {
     if (typeof bookId !== 'string') return null
     const book = findBook(await library(), bookId)
-    if (!book || book.format !== 'epub') return null
+    if (!book) return null
+
+    /*
+      A file beside the book wins over anything derived from it.
+
+      An EPUB carries its own cover and a PDF has a first page, but our own
+      books are folders of Markdown with nothing to extract, and the shelf is
+      the first thing a reader sees. Dropping a `cover.png` in the folder is the
+      one way to change a cover that needs no feature and no interface.
+    */
+    try {
+      const found = await bookCover(book.path)
+      if (found) return found
+    } catch {
+      // Unreadable image; fall through to whatever the format offers.
+    }
+
+    if (book.format !== 'epub') return null
     try {
       return await epubCover(book.path)
     } catch {

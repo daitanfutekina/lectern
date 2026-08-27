@@ -1178,9 +1178,14 @@ body.is-home #flag-bar {
   Sized like the other header controls rather than left to inherit whatever the
   button element felt like -- it was a different height from everything beside
   it and the glyph sat off-centre.
+
+  Settings was missed entirely when this was written, so it kept the browser's
+  own button: a white slab with black text sitting between two dark outlined
+  ones. A rule that lists its selectors by hand needs every one of them.
 */
 #collapse,
-#home {
+#home,
+#settings {
   display: inline-flex;
   height: 26px;
   align-items: center;
@@ -1203,7 +1208,8 @@ body.is-home #flag-bar {
 }
 
 #collapse:hover,
-#home:hover {
+#home:hover,
+#settings:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1214,7 +1220,8 @@ body.is-home #flag-bar {
   would leave the reader in a book with no way back except a keyboard shortcut
   nothing mentions.
 */
-body.is-collapsed #home {
+body.is-collapsed #home,
+body.is-collapsed #settings {
   width: 32px;
   overflow: hidden;
   padding: 0;
@@ -1223,6 +1230,11 @@ body.is-collapsed #home {
 
 body.is-collapsed #home::before {
   content: '☰';
+  font-size: 13px;
+}
+
+body.is-collapsed #settings::before {
+  content: '⚙';
   font-size: 13px;
 }
 

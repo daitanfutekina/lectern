@@ -1,5 +1,5 @@
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, extname, join } from 'node:path'
 import { parseManifest, splitFrontMatter } from '@shared/manifest'
 import { extractHeadings, countWords } from '@shared/outline'
 import { epubDocument, openEpub } from './epub'
@@ -252,4 +252,45 @@ export async function readChapterSource(book: Book, file: string): Promise<strin
   if (book.format === 'epub') return epubDocument(book.path, file)
   if (book.format === 'pdf') return pdfChapter(book.path, file)
   return readIfPresent(join(book.path, file))
+}
+
+/**
+ * A cover image sitting beside the book, as a data URL.
+ *
+ * `path` is a folder for our own books and a file for a PDF or an EPUB, so a
+ * file's cover is looked for beside it rather than inside it. Returns null when
+ * there is none, which is the ordinary case.
+ */
+export async function bookCover(path: string): Promise<string | null> {
+  const TYPES: Record<string, string> = {
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif'
+  }
+
+  let folder = path
+  try {
+    if (!(await stat(path)).isDirectory()) folder = dirname(path)
+  } catch {
+    return null
+  }
+
+  let entries: string[] = []
+  try {
+    entries = await readdir(folder)
+  } catch {
+    return null
+  }
+
+  const name = entries.find((entry) => /^cover\.(svg|png|jpe?g|webp|gif)$/i.test(entry))
+  if (!name) return null
+
+  const type = TYPES[extname(name).toLowerCase()]
+  if (!type) return null
+
+  const bytes = await readFile(join(folder, name))
+  return `data:${type};base64,${bytes.toString('base64')}`
 }
