@@ -683,6 +683,10 @@ LIVE-RELOAD-MARKER
     shelfCards: document.querySelectorAll('.shelf-card').length,
     shelfIds: [...document.querySelectorAll('.shelf-card')].map((c) => c.dataset.book).slice(0, 6),
     flagCount: document.querySelectorAll('.flag').length,
+    // Solutions must arrive collapsed, which is the whole reason they are a
+    // <details> rather than a section.
+    solutionBoxes: document.querySelectorAll('details.box.solution, details.box.answer').length,
+    solutionsOpen: [...document.querySelectorAll('details.box.solution, details.box.answer')].filter((d) => d.open).length,
     prepareBar: document.querySelector('#prepare-progress')?.textContent || null,
     // The player's own voice picker: what it offers and what is selected.
     playerVoices: [...(document.querySelector('#voice')?.options ?? [])].map((o) => o.value),
