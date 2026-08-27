@@ -147,19 +147,24 @@ describe('retrieveFrame', () => {
     return [...out]
   }
 
-  it('searches only the nearest cluster', () => {
-    // A query beside the first centre must not come back with anything from the
-    // second, however the weighting works out.
+  it('comes back from the cluster the query is actually near', () => {
+    /*
+      Several clusters are searched, not just the closest -- searching only the
+      closest found neighbours barely half as close as the true nearest on real
+      queries. Distant vectors are still found, they simply weigh nothing.
+    */
     const near = frame([0, 0, 0, 2])
-    expect(near[0]).toBeLessThan(1)
+    expect(near[0]).toBeLessThan(0.01)
     const far = frame([10, 10, 10, 12])
-    expect(far[0]).toBeGreaterThan(9)
+    expect(far[0]).toBeGreaterThan(9.9)
   })
 
   it('blends the neighbours rather than snapping to one', () => {
-    // Equidistant from both vectors in the list, so their average.
+    // Equidistant from both vectors in its own cluster, so their average. Not
+    // exactly: the far cluster is searched too and contributes a vanishing
+    // share, which is the correct behaviour rather than a rounding error.
     const blended = frame([0, 0, 0, 2])
-    expect(blended[3]).toBeCloseTo(2, 4)
+    expect(blended[3]).toBeCloseTo(2, 3)
   })
 
   it('leans toward the closer neighbour', () => {

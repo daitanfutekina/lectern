@@ -11,7 +11,9 @@
  * a flat index would mean comparing each frame against all 77,000 training
  * vectors, which is far too slow in a reading application. An inverted file
  * groups them into clusters around 1,985 centres, so a frame is compared
- * against the centres and then against only the ~39 vectors in the nearest one.
+ * against the centres and then only against the vectors in the nearest ones.
+ * How many of those "nearest ones" is the single most important number here --
+ * see `PROBES`.
  *
  * The parsing is pure and the search is arithmetic, so both live here and are
  * tested without a 233 MB file present.
@@ -176,6 +178,43 @@ export function parseIvfIndex(bytes: Uint8Array): IvfIndex {
 }
 
 /**
+ * How many clusters to look in.
+ *
+ * The stored `nprobe` is 1, and 1 is catastrophic here. Measured against a
+ * brute-force search over all 77,448 vectors, one cluster found neighbours only
+ * 59% as close as the true nearest -- on one frame, 38,402 vectors outside the
+ * chosen cluster were closer than anything inside it. Handing the model
+ * neighbours that wrong does not make it sound more like the character, it
+ * garbles the speech.
+ *
+ * The cause is that the queries come from a *different speaker*. The clusters
+ * were fitted around the character's own recordings, so a query from somewhere
+ * else lands between them and the nearest-centre shortcut stops being a good
+ * guess about where its neighbours are.
+ *
+ * 256 recovers all of it. It is also free: the cost is dominated by comparing
+ * against the 1,985 cluster centres, which happens whatever the probe count, so
+ * 256 clusters and 1 measured the same to within noise.
+ */
+const PROBES = 256
+
+/**
+ * Working room, reused across frames.
+ *
+ * `order` is a plain array rather than a typed one because it is sorted with a
+ * comparator, and a typed array sorted that way copies through a plain one
+ * anyway.
+ */
+export interface Scratch {
+  readonly distances: Float64Array
+  readonly order: number[]
+}
+
+export function makeScratch(lists: number): Scratch {
+  return { distances: new Float64Array(lists), order: Array.from({ length: lists }, (_, i) => i) }
+}
+
+/**
  * Replace a frame's features with a blend of the nearest training features.
  *
  * This is what makes a conversion sound like the voice rather than merely
@@ -194,14 +233,23 @@ export function retrieveFrame(
   queryAt: number,
   out: Float32Array,
   outAt: number,
-  neighbours = 8
+  neighbours = 8,
+  scratch?: Scratch
 ): void {
   const { dim, centroids, lists, offsets, vectors } = index
 
-  // The nearest cluster. Only its vectors are then considered, which is the
-  // whole reason this is fast enough to run per frame.
-  let bestList = 0
-  let bestDistance = Infinity
+  /*
+    Clusters ranked by distance to their centre.
+
+    Two arrays and a comparator, rather than packing both into one number for a
+    faster sort. The packed version was wrong: `distance * lists + list` only
+    gives the index back when the distance is a whole number, and squared
+    distances never are, so it read a neighbouring cluster instead. The sort is
+    not what costs time here -- comparing against 1,985 centres is -- so there
+    was nothing to buy.
+  */
+  const space = scratch ?? makeScratch(lists)
+  const { distances, order } = space
   for (let list = 0; list < lists; list += 1) {
     const base = list * dim
     let distance = 0
@@ -209,41 +257,43 @@ export function retrieveFrame(
       const delta = (query[queryAt + k] ?? 0) - (centroids[base + k] ?? 0)
       distance += delta * delta
     }
-    if (distance < bestDistance) {
-      bestDistance = distance
-      bestList = list
-    }
+    distances[list] = distance
+    order[list] = list
   }
+  order.sort((a, b) => (distances[a] ?? 0) - (distances[b] ?? 0))
 
-  const from = offsets[bestList] ?? 0
-  const size = (offsets[bestList + 1] ?? 0) - from
-  if (size === 0) {
-    for (let k = 0; k < dim; k += 1) out[outAt + k] = query[queryAt + k] ?? 0
-    return
-  }
-
-  const take = Math.min(neighbours, size)
+  const probes = Math.min(PROBES, lists)
+  const take = Math.min(neighbours, index.total)
   const bestIndex = new Int32Array(take).fill(-1)
   const bestScore = new Float64Array(take).fill(Infinity)
 
-  for (let entry = 0; entry < size; entry += 1) {
-    const base = (from + entry) * dim
-    let distance = 0
-    for (let k = 0; k < dim; k += 1) {
-      const delta = (query[queryAt + k] ?? 0) - (vectors[base + k] ?? 0)
-      distance += delta * delta
-    }
-    if (distance >= (bestScore[take - 1] ?? Infinity)) continue
+  for (let probe = 0; probe < probes; probe += 1) {
+    const list = order[probe] ?? 0
+    const from = offsets[list] ?? 0
+    const until = offsets[list + 1] ?? 0
 
-    // An insertion sort over eight entries, which beats a heap at this size.
-    let slot = take - 1
-    while (slot > 0 && (bestScore[slot - 1] ?? Infinity) > distance) {
-      bestScore[slot] = bestScore[slot - 1] ?? Infinity
-      bestIndex[slot] = bestIndex[slot - 1] ?? -1
-      slot -= 1
+    for (let entry = from; entry < until; entry += 1) {
+      const base = entry * dim
+      let distance = 0
+      for (let k = 0; k < dim; k += 1) {
+        const delta = (query[queryAt + k] ?? 0) - (vectors[base + k] ?? 0)
+        distance += delta * delta
+        // Nothing this far out can win; abandoning early is most of the reason
+        // a wide probe costs no more than a narrow one.
+        if (distance >= (bestScore[take - 1] ?? Infinity)) break
+      }
+      if (distance >= (bestScore[take - 1] ?? Infinity)) continue
+
+      // An insertion sort over eight entries, which beats a heap at this size.
+      let slot = take - 1
+      while (slot > 0 && (bestScore[slot - 1] ?? Infinity) > distance) {
+        bestScore[slot] = bestScore[slot - 1] ?? Infinity
+        bestIndex[slot] = bestIndex[slot - 1] ?? -1
+        slot -= 1
+      }
+      bestScore[slot] = distance
+      bestIndex[slot] = entry
     }
-    bestScore[slot] = distance
-    bestIndex[slot] = from + entry
   }
 
   /*
@@ -298,8 +348,10 @@ export function retrieve(
 
   const { dim } = index
   const retrieved = new Float32Array(frames * dim)
+  // One scratch buffer for the whole pass rather than one per frame.
+  const scratch = makeScratch(index.lists)
   for (let frame = 0; frame < frames; frame += 1) {
-    retrieveFrame(index, features, frame * dim, retrieved, frame * dim)
+    retrieveFrame(index, features, frame * dim, retrieved, frame * dim, 8, scratch)
   }
 
   const keep = 1 - rate
