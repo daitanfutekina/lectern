@@ -24,6 +24,10 @@ export interface NeuralUtterance {
   readonly character?: string | null
   /** Semitones to move the base voice before converting. */
   readonly semitones?: number
+  /** How strongly to pull the conversion toward the character's own recordings. */
+  readonly indexRate?: number
+  /** How far to leave unvoiced sounds alone. */
+  readonly protect?: number
 }
 
 export interface Playing {
@@ -112,7 +116,9 @@ export async function synthesise(utterance: NeuralUtterance): Promise<Spoken | n
     utterance.shape,
     utterance.speed,
     utterance.character ?? null,
-    utterance.semitones ?? 0
+    utterance.semitones ?? 0,
+    utterance.indexRate ?? 0.75,
+    utterance.protect ?? 0.33
   )
   return result && result.pcm.length > 0 ? result : null
 }

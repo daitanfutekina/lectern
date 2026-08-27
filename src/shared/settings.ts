@@ -43,6 +43,16 @@ export interface Settings {
    * sounds like that voice straining.
    */
   readonly characterPitch: number
+  /**
+   * How strongly to pull the conversion toward the character's own recordings,
+   * 0 to 1. Does nothing unless the voice ships a retrieval index.
+   */
+  readonly characterIndex: number
+  /**
+   * How far to leave unvoiced sounds -- t, k, s, breath -- alone, 0 to 0.5.
+   * Lower protects more; 0.5 is off.
+   */
+  readonly characterProtect: number
 
   /* Mathematics */
   readonly math: GateSettings
@@ -67,6 +77,9 @@ export const DEFAULT_SETTINGS: Settings = {
   pauseScale: 1,
   character: null,
   characterPitch: 0,
+  // RVC's own defaults, which are what its models were tuned against.
+  characterIndex: 0.75,
+  characterProtect: 0.33,
   math: DEFAULT_GATE,
   ocrDpi: 300,
   ocrAuto: true,
@@ -118,6 +131,8 @@ export function parseSettings(source: string): Settings {
     // An octave either way. Past that the converter is being asked to invent a
     // register the model has never produced, and it stops sounding like anyone.
     characterPitch: Math.round(num(raw['characterPitch'], 0, -12, 12)),
+    characterIndex: num(raw['characterIndex'], 0.75, 0, 1),
+    characterProtect: num(raw['characterProtect'], 0.33, 0, 0.5),
     math: {
       maxWords: num(
         isRecord(raw['math']) ? raw['math']['maxWords'] : undefined,

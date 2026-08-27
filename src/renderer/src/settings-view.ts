@@ -280,6 +280,35 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
       })
     })
 
+    characterControls.push(
+      slider(
+        'Likeness',
+        context.settings.characterIndex,
+        0,
+        1,
+        0.05,
+        (value) => context.onChange({ characterIndex: value }),
+        (value) =>
+          value === 0 ? 'off' : value < 0.4 ? 'light' : value > 0.85 ? 'strong' : 'balanced'
+      ),
+      slider(
+        'Keep consonants',
+        // Shown the other way up: the stored number is how much conversion to
+        // *allow* on unvoiced sounds, and nobody thinks about it that way.
+        0.5 - context.settings.characterProtect,
+        0,
+        0.5,
+        0.02,
+        (value) => context.onChange({ characterProtect: 0.5 - value }),
+        (value) => (value <= 0 ? 'off' : value >= 0.48 ? 'most' : 'some')
+      ),
+      note(
+        'Likeness pulls each moment toward the nearest thing the character ' +
+          'actually recorded. Keeping consonants leaves the T and S sounds to ' +
+          'the base voice, which is where a converter does its worst work.'
+      )
+    )
+
     characterControls.push(row('Prepared', used), row('', clear))
 
     characterControls.push(

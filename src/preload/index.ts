@@ -102,9 +102,21 @@ const api = {
       shape: VoiceShape,
       speed: number,
       character?: string | null,
-      semitones?: number
+      semitones?: number,
+      indexRate?: number,
+      protect?: number
     ): Promise<{ pcm: Int16Array; sampleRate: number } | null> =>
-      ipcRenderer.invoke('voice:speak', voiceId, text, shape, speed, character, semitones),
+      ipcRenderer.invoke(
+        'voice:speak',
+        voiceId,
+        text,
+        shape,
+        speed,
+        character,
+        semitones,
+        indexRate,
+        protect
+      ),
     /** Where voices are installed, for the message shown when there are none. */
     folder: (): Promise<string> => ipcRenderer.invoke('voice:folder'),
     /**
@@ -130,7 +142,9 @@ const api = {
       shape: VoiceShape,
       speed: number,
       character: string,
-      semitones: number
+      semitones: number,
+      indexRate: number,
+      protect: number
     ): Promise<void> =>
       ipcRenderer.invoke(
         'voice:prepare',
@@ -141,7 +155,9 @@ const api = {
         shape,
         speed,
         character,
-        semitones
+        semitones,
+        indexRate,
+        protect
       ),
     cancelPrepare: (): Promise<void> => ipcRenderer.invoke('voice:cancelPrepare'),
 

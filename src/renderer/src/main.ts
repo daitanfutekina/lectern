@@ -821,7 +821,9 @@ function startPreparing(): void {
     settings.shape,
     settings.rate,
     settings.character,
-    settings.characterPitch
+    settings.characterPitch,
+    settings.characterIndex,
+    settings.characterProtect
   )
 }
 
@@ -1317,7 +1319,12 @@ function applySettings(): void {
   reader.setRate(settings.rate)
   reader.setShape(settings.shape)
   reader.setPauseScale(settings.pauseScale)
-  reader.setCharacter(settings.character, settings.characterPitch)
+  reader.setCharacter(
+    settings.character,
+    settings.characterPitch,
+    settings.characterIndex,
+    settings.characterProtect
+  )
   // Every one of those changes what the stored audio would have to be, so the
   // job starts again rather than finishing a chapter nobody will hear.
   startPreparing()

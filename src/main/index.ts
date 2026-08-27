@@ -102,6 +102,26 @@ function isPosition(value: unknown): value is ReadingPosition {
   return typeof candidate['block'] === 'number' && typeof candidate['within'] === 'number'
 }
 
+/**
+ * The two conversion controls, clamped to the ranges the converter behaves in.
+ *
+ * Both change the audio, so both are checked here and both are part of what
+ * identifies a stored sentence: a slider that appears to do nothing because the
+ * old audio came back is a worse bug than a cache that misses.
+ */
+function conversion(indexRate: unknown, protect: unknown): { indexRate: number; protect: number } {
+  return {
+    indexRate:
+      typeof indexRate === 'number' && Number.isFinite(indexRate)
+        ? Math.min(Math.max(indexRate, 0), 1)
+        : 0.75,
+    protect:
+      typeof protect === 'number' && Number.isFinite(protect)
+        ? Math.min(Math.max(protect, 0), 0.5)
+        : 0.33
+  }
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     // Width is overridable so a resize can be verified end to end: the point
@@ -247,7 +267,9 @@ app.whenReady().then(() => {
       shape: unknown,
       speed: unknown,
       character: unknown,
-      semitones: unknown
+      semitones: unknown,
+      indexRate: unknown,
+      protect: unknown
     ) => {
       if (typeof bookId !== 'string' || typeof file !== 'string') return
       if (!Array.isArray(sentences) || typeof voiceId !== 'string') return
@@ -268,7 +290,8 @@ app.whenReady().then(() => {
           semitones:
             typeof semitones === 'number' && Number.isFinite(semitones)
               ? Math.round(Math.min(Math.max(semitones, -12), 12))
-              : 0
+              : 0,
+          ...conversion(indexRate, protect)
         }
       )
     }
@@ -293,7 +316,9 @@ app.whenReady().then(() => {
       shape: unknown,
       speed: unknown,
       character: unknown,
-      semitones: unknown
+      semitones: unknown,
+      indexRate: unknown,
+      protect: unknown
     ) => {
       if (typeof voiceId !== 'string' || typeof text !== 'string' || !text.trim()) return null
 
@@ -309,7 +334,8 @@ app.whenReady().then(() => {
         semitones:
           typeof semitones === 'number' && Number.isFinite(semitones)
             ? Math.round(Math.min(Math.max(semitones, -12), 12))
-            : 0
+            : 0,
+        ...conversion(indexRate, protect)
       }
 
       /*
@@ -327,7 +353,14 @@ app.whenReady().then(() => {
         request.text,
         request.shape,
         request.speed,
-        request.character ? { name: request.character, semitones: request.semitones } : undefined
+        request.character
+          ? {
+              name: request.character,
+              semitones: request.semitones,
+              indexRate: request.indexRate,
+              protect: request.protect
+            }
+          : undefined
       )
       if (!result) return null
       // Kept, so the next time through this sentence is free. Not awaited: the

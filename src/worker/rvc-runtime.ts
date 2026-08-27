@@ -1,8 +1,14 @@
-import { readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { cpus } from 'node:os'
 import { join } from 'node:path'
 import * as ort from 'onnxruntime-node'
 import { melFilterbank, resample, stftMagnitude } from '@shared/dsp'
+import {
+  parseIvfIndex,
+  protectUnvoiced,
+  retrieve,
+  type IvfIndex
+} from '@shared/faiss-ivf'
 import {
   CONTENT_MODEL,
   FRAME_RATE,
@@ -49,6 +55,8 @@ export interface Character {
   readonly content: ort.InferenceSession
   readonly pitch: ort.InferenceSession
   readonly voice: ort.InferenceSession
+  /** The features of the audio this voice was trained on, when it ships them. */
+  readonly index: IvfIndex | null
 }
 
 export interface Converted {
@@ -113,7 +121,25 @@ export async function loadCharacter(dir: string, name: string): Promise<Characte
     ort.InferenceSession.create(join(folder, model), OPTIONS)
   ])
 
-  return { content, pitch, voice }
+  /*
+    The index is optional and worth a lot.
+
+    A voice without one still converts; it just converts generically, because
+    the model is handed whatever the encoder produced rather than the nearest
+    thing the character actually said. A voice that ships one and fails to load
+    it should say so and carry on rather than refuse to speak.
+  */
+  let index: IvfIndex | null = null
+  const indexFile = readdirSync(folder).find((file) => file.toLowerCase().endsWith('.index'))
+  if (indexFile) {
+    try {
+      index = parseIvfIndex(readFileSync(join(folder, indexFile)))
+    } catch (error) {
+      process.stderr.write(`retrieval index unusable: ${String(error).slice(0, 200)}\n`)
+    }
+  }
+
+  return { content, pitch, voice, index }
 }
 
 /* -- The chain ------------------------------------------------------------ */
@@ -163,12 +189,32 @@ async function pitchOf(
  * pitch track sounds like that voice straining, so the base voice has to be
  * moved into the character's range first.
  */
+export interface ConvertOptions {
+  /**
+   * How much of the retrieved features to keep, 0 to 1.
+   *
+   * The trade is real in both directions: all the way up is most faithfully the
+   * character and least faithful to what was said, and all the way down is the
+   * reverse. Nothing happens at all without an index on disk.
+   */
+  readonly indexRate: number
+  /**
+   * How far to leave unvoiced sounds alone, 0 to 0.5.
+   *
+   * Lower protects more. Above 0.5 it is off, which is how RVC spells "do not
+   * protect anything".
+   */
+  readonly protect: number
+}
+
 export async function convert(
   character: Character,
   samples: Float32Array,
   sampleRate: number,
-  semitones: number
+  semitones: number,
+  options: ConvertOptions
 ): Promise<Converted> {
+  const indexRate = Math.min(Math.max(options.indexRate, 0), 1)
   // Both analysis models were trained at 16 kHz and neither is tolerant of
   // being fed something else.
   const audio = resample(samples, sampleRate, RMVPE_MEL.sampleRate)
@@ -180,7 +226,19 @@ export async function convert(
     pitchOf(character.pitch, audio)
   ])
 
-  const phone = upsampleFeatures(content.features, content.frames, content.dim)
+  /*
+    Retrieval, at the encoder's own frame rate.
+
+    Done before the features are stretched to the model's rate, because the
+    index was built from unstretched ones -- searching a doubled frame against
+    them would be comparing against neighbours the character never had.
+  */
+  const retrieved =
+    character.index && indexRate > 0
+      ? retrieve(character.index, content.features, content.frames, indexRate)
+      : content.features
+
+  const phone = upsampleFeatures(retrieved, content.frames, content.dim)
   const shifted = transpose(f0, semitones)
 
   /*
@@ -193,11 +251,30 @@ export async function convert(
   const frames = commonLength(content.frames * 2, shifted.length)
   if (frames === 0) return { samples: new Float32Array(0), sampleRate }
 
+  /*
+    Consonants come back from the base voice.
+
+    Only meaningful once retrieval is on: with none, the two sets of features
+    are identical and this blend is a no-op, which is why RVC's own `protect`
+    appears to do nothing at an index rate of zero.
+  */
+  const protectedPhone =
+    character.index && indexRate > 0
+      ? protectUnvoiced(
+          phone,
+          upsampleFeatures(content.features, content.frames, content.dim),
+          shifted,
+          frames,
+          content.dim,
+          options.protect
+        )
+      : phone
+
   const nsff0 = shifted.subarray(0, frames)
   const coarse = coarsePitch(nsff0)
 
   const output = await character.voice.run({
-    phone: new ort.Tensor('float32', phone.subarray(0, frames * content.dim), [
+    phone: new ort.Tensor('float32', protectedPhone.subarray(0, frames * content.dim), [
       1,
       frames,
       content.dim

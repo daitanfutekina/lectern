@@ -91,7 +91,12 @@ async function run(current: Job): Promise<void> {
           text,
           request.shape,
           request.speed,
-          { name: request.character ?? '', semitones: request.semitones }
+          {
+            name: request.character ?? '',
+            semitones: request.semitones,
+            indexRate: request.indexRate,
+            protect: request.protect
+          }
         )
         if (spoken) await writeSpeech(request, spoken)
         else failed += 1

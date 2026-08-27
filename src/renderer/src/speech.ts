@@ -64,6 +64,8 @@ export class Reader {
    */
   private character: string | null = null
   private characterPitch = 0
+  private indexRate = 0.75
+  private protect = 0.33
   private playing_: Playing | null = null
 
   /**
@@ -143,9 +145,11 @@ export class Reader {
    * applied to whichever neural voice is speaking, not an alternative to it,
    * and the base voice still decides the pronunciation and the pacing.
    */
-  setCharacter(name: string | null, semitones: number): void {
+  setCharacter(name: string | null, semitones: number, indexRate = 0.75, protect = 0.33): void {
     this.character = name
     this.characterPitch = semitones
+    this.indexRate = indexRate
+    this.protect = protect
     this.ahead = null
     if (this.playing) this.restartCurrent()
     else {
@@ -424,7 +428,9 @@ export class Reader {
       speed: this.rate,
       pauseScale: this.pauseScale,
       character: this.character,
-      semitones: this.characterPitch
+      semitones: this.characterPitch,
+      indexRate: this.indexRate,
+      protect: this.protect
     }
   }
 

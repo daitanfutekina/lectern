@@ -8,7 +8,9 @@ const base: SpeechRequest = {
   shape: BOOK_VOICE,
   speed: 1,
   character: 'teto',
-  semitones: 4
+  semitones: 4,
+  indexRate: 0.75,
+  protect: 0.33
 }
 
 const changed = (change: Partial<SpeechRequest>): string => speechKey({ ...base, ...change })
@@ -36,6 +38,14 @@ describe('speechKey', () => {
 
   it('changes with the pitch shift', () => {
     expect(changed({ semitones: 5 })).not.toBe(speechKey(base))
+  })
+
+  it('changes with how hard the conversion is pulled toward the character', () => {
+    expect(changed({ indexRate: 0.5 })).not.toBe(speechKey(base))
+  })
+
+  it('changes with how far unvoiced sounds are left alone', () => {
+    expect(changed({ protect: 0.2 })).not.toBe(speechKey(base))
   })
 
   it('changes with the base voice', () => {

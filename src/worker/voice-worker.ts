@@ -168,6 +168,8 @@ interface Request {
   speaker?: number
   character?: string
   semitones?: number
+  indexRate?: number
+  protect?: number
 }
 
 async function handle(line: string): Promise<void> {
@@ -191,7 +193,10 @@ async function handle(line: string): Promise<void> {
     if (request.character) {
       const voice = await character(request.character)
       if (voice) {
-        const converted = await convert(voice, samples, sampleRate, request.semitones ?? 0)
+        const converted = await convert(voice, samples, sampleRate, request.semitones ?? 0, {
+          indexRate: request.indexRate ?? 0.75,
+          protect: request.protect ?? 0.33
+        })
         samples = converted.samples
         sampleRate = converted.sampleRate
       }

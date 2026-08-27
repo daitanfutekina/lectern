@@ -376,6 +376,8 @@ function settle(
 export interface CharacterRequest {
   readonly name: string
   readonly semitones: number
+  readonly indexRate: number
+  readonly protect: number
 }
 
 export interface Spoken {
@@ -411,7 +413,9 @@ export async function speak(
         speed,
         speaker: voice.speaker,
         character: character?.name,
-        semitones: character?.semitones ?? 0
+        semitones: character?.semitones ?? 0,
+        indexRate: character?.indexRate ?? 0.75,
+        protect: character?.protect ?? 0.33
       }
       active.process.stdin.write(`${JSON.stringify(request)}\n`)
     } catch {
