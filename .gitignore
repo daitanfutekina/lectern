@@ -10,5 +10,7 @@ release/
 
 secrets.json
 
-.claude/
+# Local Claude Code state: permissions, session scratch. Not shared.
+.claude/*
+!.claude/skills/
 CLAUDE.local.md
