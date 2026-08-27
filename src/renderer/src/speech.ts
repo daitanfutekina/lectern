@@ -1,5 +1,12 @@
 import { clampRate } from '@shared/speech'
-import { BOOK_VOICE, speak as speakNeural, type Playing } from './neural-voice'
+import {
+  BOOK_VOICE,
+  speak as speakNeural,
+  synthesise,
+  type NeuralUtterance,
+  type Playing,
+  type Spoken
+} from './neural-voice'
 import type { VoiceShape } from '@shared/voice'
 import { rangeWithin, sourceIndex, utteranceRange, utteranceSpan, type Utterance } from './blocks'
 
@@ -72,10 +79,21 @@ export class Reader {
   /** Identifies the in-flight neural utterance, so a stale one cannot advance. */
   private neuralToken: object | null = null
 
+  /**
+   * The next sentence's audio, being made while this one plays.
+   *
+   * Held with the index it was made for, because everything that invalidates it
+   * -- a jump, a new chapter, a different voice -- changes which sentence comes
+   * next, and comparing indices is cheaper and harder to get wrong than
+   * remembering to clear it in each of those places.
+   */
+  private ahead: { index: number; audio: Promise<Spoken | null> } | null = null
+
   load(utterances: Utterance[], startAt = 0): void {
     this.stop()
     this.queue = utterances
     this.at = Math.max(0, Math.min(startAt, Math.max(0, utterances.length - 1)))
+    this.prime()
     this.emit()
   }
 
@@ -109,8 +127,13 @@ export class Reader {
   /** Choose a neural voice, or pass null to fall back to the system voices. */
   setNeuralVoice(id: string | null): void {
     this.neuralVoice = id
+    // Made for a voice that is no longer the voice.
+    this.ahead = null
     if (this.playing) this.restartCurrent()
-    else this.emit()
+    else {
+      this.prime()
+      this.emit()
+    }
   }
 
   /**
@@ -123,12 +146,17 @@ export class Reader {
   setCharacter(name: string | null, semitones: number): void {
     this.character = name
     this.characterPitch = semitones
+    this.ahead = null
     if (this.playing) this.restartCurrent()
-    else this.emit()
+    else {
+      this.prime()
+      this.emit()
+    }
   }
 
   setShape(shape: VoiceShape): void {
     this.shape = shape
+    this.ahead = null
     if (this.playing) this.restartCurrent()
     else this.emit()
   }
@@ -144,6 +172,7 @@ export class Reader {
 
   setRate(rate: number): void {
     this.rate = clampRate(rate)
+    this.ahead = null
     // The rate of an utterance already with the engine cannot be changed, so
     // the current sentence is restarted at the new speed rather than the change
     // appearing to do nothing until the next one.
@@ -213,6 +242,8 @@ export class Reader {
       const utterance = this.queue[this.at]
       if (utterance) this.showUtterance(utterance)
       this.clearHighlight()
+      // Clicking a paragraph is usually a prelude to pressing play.
+      this.prime()
     }
     this.emit()
   }
@@ -336,22 +367,19 @@ export class Reader {
     const token = {}
     this.neuralToken = token
 
+    // Whatever was made ahead of time, if it was made for this sentence.
+    const ready = this.ahead?.index === this.at ? await this.ahead.audio : null
+    this.ahead = null
+
     let playing: Playing
     try {
       playing = await speakNeural(
-        {
-          text: utterance.text,
-          voiceId,
-          shape: this.shape,
-          speed: this.rate,
-          pauseScale: this.pauseScale,
-          character: this.character,
-          semitones: this.characterPitch
-        },
+        this.request(utterance, voiceId),
         (charIndex) => {
           if (this.neuralToken !== token) return
           this.highlightWord(utterance, charIndex, 0)
-        }
+        },
+        ready
       )
     } catch {
       this.playing = false
@@ -368,6 +396,10 @@ export class Reader {
     this.playing_ = playing
     this.showUtterance(utterance)
 
+    // The next sentence, made while this one speaks. At twice realtime the
+    // generator stays comfortably ahead of the voice, so the join is silent.
+    this.lookAhead(voiceId)
+
     await playing.done
     if (this.neuralToken !== token || !this.playing) return
 
@@ -381,6 +413,68 @@ export class Reader {
     this.at += 1
     this.speakCurrent()
     this.emit()
+  }
+
+  /** Everything the synthesiser needs, in one place so look-ahead cannot drift. */
+  private request(utterance: Utterance, voiceId: string): NeuralUtterance {
+    return {
+      text: utterance.text,
+      voiceId,
+      shape: this.shape,
+      speed: this.rate,
+      pauseScale: this.pauseScale,
+      character: this.character,
+      semitones: this.characterPitch
+    }
+  }
+
+  /**
+   * Start making the sentence after this one.
+   *
+   * Nothing waits on it. If the reader jumps, changes voice, or stops, the
+   * result is simply dropped -- `ahead` is only ever used when its index still
+   * matches the sentence about to be spoken, so a stale one cannot be played.
+   */
+  private lookAhead(voiceId: string): void {
+    this.prefetch(this.at + 1, voiceId)
+  }
+
+  /**
+   * Make the sentence at `index` ahead of time, if it is not already being made.
+   *
+   * The guard matters more than it looks: a PDF rebuilds its speech queue every
+   * time a page finishes drawing, so without it a scroll would start a fresh
+   * synthesis of the same sentence several times a second.
+   */
+  private prefetch(index: number, voiceId: string): void {
+    if (index < 0 || index >= this.queue.length) {
+      this.ahead = null
+      return
+    }
+    if (this.ahead?.index === index) return
+
+    const utterance = this.queue[index]
+    if (!utterance) return
+
+    this.ahead = {
+      index,
+      // Rejections are swallowed here rather than left unhandled: this promise
+      // may never be awaited at all.
+      audio: synthesise(this.request(utterance, voiceId)).catch(() => null)
+    }
+  }
+
+  /**
+   * Make the sentence that would be spoken next, before anyone asks for it.
+   *
+   * Look-ahead keeps the *middle* of a chapter seamless but does nothing for the
+   * start, because the first sentence has nothing playing in front of it to be
+   * made behind. At Kokoro's speed that is several seconds between pressing
+   * play and hearing anything, which reads as the button not working.
+   */
+  private prime(): void {
+    if (this.playing || !this.neuralVoice) return
+    this.prefetch(this.at, this.neuralVoice)
   }
 
   /**

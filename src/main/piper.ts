@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
@@ -137,12 +137,105 @@ export async function listVoices(): Promise<PiperVoice[]> {
       if (!files.some((file) => file.endsWith('.onnx'))) continue
       if (!files.includes('tokens.txt')) continue
 
-      found.push({ id: name, name: prettyName(name), path, sampleRate: 22050, speakers: 1 })
+      /*
+        A Kokoro folder carries its speakers in `voices.bin`, which is what
+        tells the two engines apart -- a Piper folder has one speaker and no
+        such file. One Kokoro model holds dozens, so it becomes dozens of
+        entries in the picker rather than one.
+      */
+      if (files.includes('voices.bin')) {
+        for (const speaker of await kokoroSpeakers(path)) {
+          found.push({
+            id: `${name}#${speaker.id}`,
+            name: prettyKokoro(speaker.name),
+            path,
+            sampleRate: 24000,
+            speakers: 1,
+            engine: 'kokoro',
+            speaker: speaker.id,
+            lexicon: lexiconFor(speaker.name)
+          })
+        }
+        continue
+      }
+
+      found.push({
+        id: name,
+        name: prettyName(name),
+        path,
+        sampleRate: 22050,
+        speakers: 1,
+        engine: 'piper',
+        speaker: 0
+      })
     } catch {
       // Unreadable folder; not a voice as far as the picker is concerned.
     }
   }
   return found
+}
+
+/**
+ * The speakers inside a Kokoro model, named where the model says what they are.
+ *
+ * Kokoro ships a `voices.bin` of speaker embeddings and, in the sherpa builds,
+ * a `voices.txt` listing their names in the same order. Without the names the
+ * picker would offer "Speaker 27", which tells a reader nothing about whether
+ * they want to listen to it.
+ */
+async function kokoroSpeakers(path: string): Promise<{ id: number; name: string }[]> {
+  try {
+    const listing = await readFile(join(path, 'voices.txt'), 'utf8')
+    const names = listing
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (names.length > 0) return names.map((name, id) => ({ id, name }))
+  } catch {
+    // No listing; fall through to numbering them.
+  }
+
+  // The model still works without names, so it is offered anyway.
+  return [{ id: 0, name: 'Kokoro' }]
+}
+
+/**
+ * Which English lexicon a Kokoro voice should be read with.
+ *
+ * Kokoro's own name says: `a` is American and `b` is British. The accent lives
+ * in the speaker embedding, but the *pronunciation* comes from the lexicon, and
+ * pairing a British speaker with an American dictionary gets the vowels wrong
+ * in exactly the words a reader would notice.
+ */
+export function lexiconFor(voiceName: string): 'us' | 'gb' {
+  return voiceName.startsWith('b') ? 'gb' : 'us'
+}
+
+/**
+ * `af_heart` reads better as `Heart (American, female)`.
+ *
+ * Kokoro's names encode the accent and the speaker's voice type in the two
+ * letters before the underscore, which is exactly the information a reader
+ * choosing a narrator wants and would otherwise have to look up.
+ */
+function prettyKokoro(name: string): string {
+  const match = /^([abefhijpz])([fm])_(.+)$/.exec(name)
+  if (!match) return name
+
+  const [, region = '', sex = '', rest = ''] = match
+  const accents: Record<string, string> = {
+    a: 'American',
+    b: 'British',
+    e: 'Spanish',
+    f: 'French',
+    h: 'Hindi',
+    i: 'Italian',
+    j: 'Japanese',
+    p: 'Portuguese',
+    z: 'Chinese'
+  }
+  const label = `${rest.charAt(0).toUpperCase()}${rest.slice(1)}`
+  return `${label} (${accents[region] ?? region}, ${sex === 'f' ? 'female' : 'male'})`
 }
 
 /** `vits-piper-en_GB-alba-medium` reads better as `Alba (en GB, medium)`. */
@@ -165,8 +258,16 @@ interface Worker {
 let worker: Worker | null = null
 let nextId = 1
 
+/*
+  A worker is reused only while nothing it baked in has changed.
+
+  The engine and the model folder decide which model is loaded; the shape is
+  baked in at load time for Piper. The speaker is *not* here on purpose: Kokoro
+  picks it per sentence, so switching narrator inside one model costs nothing.
+*/
 const shapeKey = (voice: PiperVoice, shape: VoiceShape): string =>
-  `${voice.id}|${shape.lengthScale}|${shape.noiseScale}|${shape.noiseW}`
+  `${voice.engine}|${voice.path}|${voice.lexicon ?? ''}|` +
+  `${shape.lengthScale}|${shape.noiseScale}|${shape.noiseW}`
 
 /**
  * Start a worker for a voice and shape, replacing one running with different
@@ -192,7 +293,9 @@ function ensureWorker(voice: PiperVoice, shape: VoiceShape): Worker | null {
         String(shape.lengthScale),
         String(shape.noiseScale),
         String(shape.noiseW),
-        characterDir()
+        characterDir(),
+        voice.engine,
+        voice.lexicon ?? ''
       ],
       { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
     )
@@ -306,6 +409,7 @@ export async function speak(
         id,
         text,
         speed,
+        speaker: voice.speaker,
         character: character?.name,
         semitones: character?.semitones ?? 0
       }

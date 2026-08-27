@@ -976,10 +976,14 @@ async function setUpPlayer(): Promise<void> {
       moment the voice list arrives -- which is exactly what happened, and left
       the picker showing only the voices the reader was trying to get away from.
     */
-    if (neural.length > 0) {
+    // Grouped by engine, best first: a flat list gives a reader no way to tell
+    // that half the voices are a generation better than the other half.
+    for (const engine of ['kokoro', 'piper']) {
+      const voices = neural.filter((voice) => voice.engine === engine)
+      if (voices.length === 0) continue
       const group = document.createElement('optgroup')
-      group.label = 'Neural (Piper)'
-      for (const voice of neural) {
+      group.label = engine === 'kokoro' ? 'Kokoro' : 'Piper'
+      for (const voice of voices) {
         const option = document.createElement('option')
         option.value = `piper:${voice.id}`
         option.textContent = voice.name

@@ -34,6 +34,10 @@ const noiseScale = Number(argv[2]) || 0.667
 const noiseW = Number(argv[3]) || 0.8
 /** Where the conversion models live; absent means character voices are off. */
 const rvcDir = argv[4] ?? ''
+/** Which synthesiser this folder holds. Piper unless told otherwise. */
+const engine = argv[5] === 'kokoro' ? 'kokoro' : 'piper'
+/** Which English dictionary to read with; empty means whatever the model ships. */
+const lexiconLang = argv[6] === 'gb' ? 'gb' : argv[6] === 'us' ? 'us' : ''
 
 function fail(message: string): never {
   process.stdout.write(`${JSON.stringify({ ready: false, error: message })}\n`)
@@ -44,6 +48,7 @@ if (!voiceDir) fail('no voice directory given')
 
 interface Tts {
   readonly sampleRate: number
+  readonly numSpeakers: number
   generate(options: { text: string; sid: number; speed: number }): {
     samples: Float32Array
     sampleRate: number
@@ -58,27 +63,63 @@ try {
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const sherpa = require('sherpa-onnx-node')
+
+  /*
+    Two engines, one interface.
+
+    Kokoro takes only a length scale: it has no noise controls at all, which is
+    part of why it is steadier than Piper. Piper samples both its duration
+    predictor and its flow, so the same sentence comes out at a different length
+    every time -- measured at a 258 ms spread over five takes -- and a stumble
+    over a long word is that sampling landing badly rather than anything about
+    the word.
+
+    The lexicons matter more than they look. Kokoro falls back to espeak for
+    anything it does not recognise, and espeak is where the mispronunciations
+    live, so the English lexicon is loaded when the model ships one.
+  */
+  const config =
+    engine === 'kokoro'
+      ? {
+          kokoro: {
+            model: join(voiceDir, model),
+            voices: join(voiceDir, 'voices.bin'),
+            tokens: join(voiceDir, 'tokens.txt'),
+            dataDir: join(voiceDir, 'espeak-ng-data'),
+            dictDir: files.includes('dict') ? join(voiceDir, 'dict') : '',
+            lexicon: files
+              .filter((file) =>
+                lexiconLang
+                  ? file === `lexicon-${lexiconLang}-en.txt`
+                  : /^lexicon-us-en\.txt$/.test(file)
+              )
+              .map((file) => join(voiceDir, file))
+              .join(','),
+            lengthScale
+          }
+        }
+      : {
+          vits: {
+            model: join(voiceDir, model),
+            tokens: join(voiceDir, 'tokens.txt'),
+            dataDir: join(voiceDir, 'espeak-ng-data'),
+            lengthScale,
+            noiseScale,
+            noiseScaleW: noiseW
+          }
+        }
+
   tts = new sherpa.OfflineTts({
-    model: {
-      vits: {
-        model: join(voiceDir, model),
-        tokens: join(voiceDir, 'tokens.txt'),
-        dataDir: join(voiceDir, 'espeak-ng-data'),
-        lengthScale,
-        noiseScale,
-        noiseScaleW: noiseW
-      },
-      numThreads: 2,
-      debug: false,
-      provider: 'cpu'
-    },
+    model: { ...config, numThreads: 2, debug: false, provider: 'cpu' },
     maxNumSentences: 1
   }) as Tts
 } catch (error) {
   fail(String(error).slice(0, 300))
 }
 
-process.stdout.write(`${JSON.stringify({ ready: true, sampleRate: tts.sampleRate })}\n`)
+process.stdout.write(
+  `${JSON.stringify({ ready: true, sampleRate: tts.sampleRate, speakers: tts.numSpeakers })}\n`
+)
 
 /*
   Conversion models are loaded on first use, not at startup.
@@ -123,6 +164,8 @@ interface Request {
   id?: number
   text?: string
   speed?: number
+  /** Which speaker inside the model. Kokoro carries many; Piper has one. */
+  speaker?: number
   character?: string
   semitones?: number
 }
@@ -138,7 +181,7 @@ async function handle(line: string): Promise<void> {
   try {
     const spoken = tts.generate({
       text: String(request.text ?? ''),
-      sid: 0,
+      sid: Number(request.speaker) || 0,
       speed: Number(request.speed) || 1
     })
 

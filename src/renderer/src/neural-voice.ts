@@ -91,10 +91,21 @@ export function estimateWordTimings(text: string): WordTiming[] {
  * `onWord` fires with the character offset of each word as it is estimated to
  * begin, so the reader's existing word-follow works unchanged.
  */
-export async function speak(
-  utterance: NeuralUtterance,
-  onWord?: (charIndex: number) => void
-): Promise<Playing> {
+export interface Spoken {
+  readonly pcm: Int16Array
+  readonly sampleRate: number
+}
+
+/**
+ * Generate the audio for an utterance without playing it.
+ *
+ * Split from playing so the *next* sentence can be made while the current one
+ * is still speaking. That is not an optimisation. Piper synthesises at about
+ * twenty times realtime, fast enough that generating on demand is never
+ * noticed; Kokoro runs at about twice realtime, and generating on demand there
+ * leaves a pause of roughly half a sentence before every single sentence.
+ */
+export async function synthesise(utterance: NeuralUtterance): Promise<Spoken | null> {
   const result = await window.lectern.voice.speak(
     utterance.voiceId,
     utterance.text,
@@ -103,6 +114,16 @@ export async function speak(
     utterance.character ?? null,
     utterance.semitones ?? 0
   )
+  return result && result.pcm.length > 0 ? result : null
+}
+
+export async function speak(
+  utterance: NeuralUtterance,
+  onWord?: (charIndex: number) => void,
+  ready?: Spoken | null
+): Promise<Playing> {
+  // Use what was made ahead of time, when something looked ahead.
+  const result = ready ?? (await synthesise(utterance))
 
   if (!result || result.pcm.length === 0) {
     return { done: Promise.resolve(), stop: () => {} }

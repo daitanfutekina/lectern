@@ -65,12 +65,19 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
   const picker = document.createElement('select')
   picker.className = 'settings-select'
 
-  if (context.neuralVoices.length > 0) {
+  /*
+    Grouped by engine, best first.
+
+    Two engines rather than one because Piper is not the ceiling of free local
+    speech, and a reader looking at a flat list of thirty voices has no way to
+    tell that half of them are a generation better than the other half.
+  */
+  for (const engine of ['kokoro', 'piper'] as const) {
+    const voices = context.neuralVoices.filter((voice) => voice.engine === engine)
+    if (voices.length === 0) continue
     const group = document.createElement('optgroup')
-    group.label = 'Neural (Piper)'
-    for (const voice of context.neuralVoices) {
-      group.append(option(`piper:${voice.id}`, voice.name))
-    }
+    group.label = engine === 'kokoro' ? 'Kokoro' : 'Piper'
+    for (const voice of voices) group.append(option(`piper:${voice.id}`, voice.name))
     picker.append(group)
   }
 

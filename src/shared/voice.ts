@@ -6,12 +6,33 @@
  * voice is and what can be adjusted about it.
  */
 
+/**
+ * Which synthesiser a voice folder holds.
+ *
+ * Two engines rather than one, because Piper is not the ceiling of free local
+ * speech. A Piper voice is one speaker per folder; a Kokoro folder is a single
+ * model carrying dozens, chosen by number, so a "voice" in the picker is a
+ * folder *and* a speaker id rather than only a folder.
+ */
+export type VoiceEngine = 'piper' | 'kokoro'
+
 export interface PiperVoice {
   readonly id: string
   readonly name: string
   readonly path: string
   readonly sampleRate: number
   readonly speakers: number
+  readonly engine: VoiceEngine
+  /** Which speaker inside the model. Always 0 for Piper. */
+  readonly speaker: number
+  /**
+   * Which English dictionary this voice should be pronounced with.
+   *
+   * The accent lives in the speaker embedding, but the pronunciation comes from
+   * the lexicon, and pairing a British speaker with an American dictionary gets
+   * the vowels wrong in exactly the words a reader notices.
+   */
+  readonly lexicon?: 'us' | 'gb'
 }
 
 /**
@@ -19,6 +40,9 @@ export interface PiperVoice {
  *
  * These are the levers a VITS model exposes and there are no others, which is
  * worth stating plainly: "make it sound better" resolves to these three.
+ *
+ * Kokoro reads only `lengthScale`; it has no noise controls at all, which is
+ * part of why it is steadier.
  */
 export interface VoiceShape {
   /**
@@ -29,7 +53,16 @@ export interface VoiceShape {
   readonly lengthScale: number
   /** Expressiveness. Low is flat and machine-like; high wanders. */
   readonly noiseScale: number
-  /** Variation in timing. Low is metronomic; high is loose. */
+  /**
+   * Variation in *timing*, which is a different thing from expressiveness and
+   * was for a long time welded to it here.
+   *
+   * It is the one that matters for stability. Piper samples its duration
+   * predictor, so the same sentence comes out at a different length every time
+   * -- measured at a 258 ms spread over five takes of one sentence -- and a
+   * stumble over a long word is that sampling landing badly rather than
+   * anything about the word. Lower is steadier.
+   */
   readonly noiseW: number
 }
 
