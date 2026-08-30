@@ -11,7 +11,9 @@
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check-books": "node scripts/check-library.mjs",
+    "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
