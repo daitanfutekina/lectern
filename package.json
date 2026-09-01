@@ -1,6 +1,6 @@
 {
   "name": "lectern",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "A reading application for a personal library, built around reading aloud",
   "author": "Liam Grant",
@@ -11,9 +11,13 @@
     "build": "npm run typecheck && electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "icons": "node scripts/make-icons.mjs",
+    "package": "npm run build && npm run stage-node && electron-builder --win",
+    "package:dir": "npm run build && npm run stage-node && electron-builder --win --dir",
     "test": "vitest run",
     "check-books": "node scripts/check-library.mjs",
-    "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp"
+    "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp",
+    "stage-node": "node scripts/stage-node.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",

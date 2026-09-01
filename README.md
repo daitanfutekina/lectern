@@ -61,7 +61,22 @@ npm test           # unit tests for src/shared
 npm run convert    # HTML textbook -> Markdown
 npm run check-books      # every library check that needs no toolchain
 npm run check-books:all  # the above, plus sympy identities and g++ listings
+npm run icons      # re-render the icon from scripts/make-icons.mjs
+npm run package    # installer into release/
+npm run package:dir  # the same layout, unpacked, without building an installer
 ```
+
+Packaging notes, because each was found the hard way. The build ships
+**without an asar**: the main process resolves the preload, the renderer
+bundle and the synthesis worker by paths relative to its own `__dirname`,
+and a partial unpack silently splits those apart. It ships **a real
+`node.exe`** beside the application, because the worker cannot run on
+Electron -- V8's sandbox rejects the external buffers the ONNX runtimes
+return, `ELECTRON_RUN_AS_NODE` included. And `files` in
+`electron-builder.yml` is an allowlist of the twenty-eight packages the
+main process actually requires; adding a main-process dependency without
+adding it there gives a packaged app that throws `MODULE_NOT_FOUND` on
+first use.
 
 Verifying a render needs the real application, so:
 

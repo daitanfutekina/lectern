@@ -2,6 +2,8 @@ node_modules/
 out/
 dist/
 release/
+# the Node binary staged for packaging, 81 MB, copied from whatever built it
+build/
 *.tsbuildinfo
 
 .env

@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import { readFile, readdir, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -44,8 +45,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
  * allowed". A real Node process has no such restriction, and synthesis there
  * runs at about twenty times realtime.
  *
- * The cost is a dependency on `node` being on PATH, which is fine while running
- * from source and is the open question for packaging.
+ * That was the open question for packaging, and the answer is that a Node has
+ * to travel with the application: see `nodeBinary` below.
  */
 
 let root = ''
@@ -53,6 +54,27 @@ let root = ''
 export function configurePiper(libraryRoot: string): void {
   root = libraryRoot
   void shutdownPiper()
+}
+
+/**
+ * Which binary runs the synthesis worker.
+ *
+ * Not Electron's. `ELECTRON_RUN_AS_NODE` gets as far as loading the models and
+ * reporting ready, and then every utterance comes back "External buffers are
+ * not allowed": V8's sandbox is compiled into Electron and rejects the memory
+ * sherpa-onnx and the ONNX runtime hand back, which is the reason this is a
+ * separate process in the first place. Measured against the packaged build,
+ * same worker and same voice -- node.exe returns PCM, Electron-as-node returns
+ * that error.
+ *
+ * So a Node is shipped beside the application (scripts/stage-node.mjs) and
+ * used when it is there. In development it is not, and the one on PATH runs
+ * instead -- which is also the fallback if the packaged copy ever goes missing,
+ * because a machine with Node is better served than one told nothing.
+ */
+function nodeBinary(): string {
+  const bundled = join(process.resourcesPath, process.platform === 'win32' ? 'node.exe' : 'node')
+  return existsSync(bundled) ? bundled : 'node'
 }
 
 const voicesDir = (): string => join(root, '.library', 'voices')
@@ -286,7 +308,7 @@ function ensureWorker(voice: PiperVoice, shape: VoiceShape): Worker | null {
     // carrying a second copy of it.
     const script = join(__dirname, 'voice-worker.js')
     const child = spawn(
-      'node',
+      nodeBinary(),
       [
         script,
         voice.path,

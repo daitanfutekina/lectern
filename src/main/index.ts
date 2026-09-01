@@ -135,6 +135,9 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#0d1117',
     autoHideMenuBar: true,
     title: 'Lectern',
+    // Packaged, Windows would take this from the executable anyway; set here so
+    // a development window is the same window rather than Electron's default.
+    icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // The renderer reads books. It has no reason to touch Node, and the

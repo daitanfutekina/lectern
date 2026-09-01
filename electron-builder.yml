@@ -1,0 +1,98 @@
+appId: com.lectern.app
+productName: Lectern
+copyright: Copyright (c) 2026 Liam Grant
+
+directories:
+  output: release
+  buildResources: resources
+
+# Only the main process resolves modules at run time. The renderer has none:
+# everything it imports is bundled into out/renderer, and its heavy assets --
+# MathJax, the Tesseract cores and language data, the pdf.js worker, the cmaps
+# and standard fonts -- are vendored under public/ and served over app://. So
+# the npm copies of pdfjs-dist, mathjax, tesseract.js-core and the rest are
+# build inputs that would otherwise ride along a second time and never load.
+#
+# What is kept is exactly what `out/**` requires by name, plus the transitive
+# closure of those four. Regenerate the list after adding a main-process
+# dependency, or the packaged app throws MODULE_NOT_FOUND on first use:
+#
+#   grep -oh 'require("[^"./][^"]*")' out/{main,main/chunks,preload}/*.js | sort -u
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  - '!node_modules/**'
+  - node_modules/adm-zip/**
+  - node_modules/boolean/**
+  - node_modules/define-data-property/**
+  - node_modules/define-properties/**
+  - node_modules/detect-node/**
+  - node_modules/es-define-property/**
+  - node_modules/es-errors/**
+  - node_modules/es6-error/**
+  - node_modules/escape-string-regexp/**
+  - node_modules/fflate/**
+  - node_modules/global-agent/**
+  - node_modules/globalthis/**
+  - node_modules/gopd/**
+  - node_modules/has-property-descriptors/**
+  - node_modules/json-stringify-safe/**
+  - node_modules/matcher/**
+  - node_modules/object-keys/**
+  - node_modules/onnxruntime-common/**
+  - node_modules/onnxruntime-node/**
+  - node_modules/roarr/**
+  - node_modules/semver/**
+  - node_modules/semver-compare/**
+  - node_modules/serialize-error/**
+  - node_modules/sherpa-onnx-node/**
+  - node_modules/sherpa-onnx-win-x64/**
+  - node_modules/sprintf-js/**
+  - node_modules/type-fest/**
+  - node_modules/yaml/**
+
+  # onnxruntime-node ships every platform it supports: 283 MB of darwin, linux
+  # and arm64 binaries for a Windows x64 build. Keep the one that runs.
+  - '!node_modules/onnxruntime-node/bin/napi-v6/darwin/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v6/linux/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**'
+
+# A real Node beside the application, for the synthesis worker to be spawned
+# with. See scripts/stage-node.mjs for why it cannot be Electron.
+extraResources:
+  - from: build/node.exe
+    to: node.exe
+
+# No archive.
+#
+# The first packaged build unpacked only the native modules and out/main, and
+# broke twice over: onnxruntime-node resolved onnxruntime-common upwards from
+# its unpacked directory and never crossed back into the archive, and the main
+# process resolves the preload, the renderer bundle and the spawned synthesis
+# worker by paths relative to its own __dirname -- all of which a partial
+# unpack splits apart. Unpacking enough to fix that leaves an empty archive.
+#
+# Nothing here wants the archive: it hides no source worth hiding, and the
+# `files` list above already cut node_modules to the twenty-eight packages the
+# main process actually loads. Laid out as plain directories, every path in the
+# code means the same thing packaged as it does in development.
+asar: false
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Lectern
+  # The library at C:\Library holds the books, the reading position, the voices
+  # and the settings. None of it is the installer's to remove.
+  deleteAppDataOnUninstall: false
