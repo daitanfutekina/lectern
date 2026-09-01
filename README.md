@@ -59,6 +59,8 @@ npm run build      # typecheck + build all three bundles to out/
 npm run typecheck  # main/preload and renderer, separately
 npm test           # unit tests for src/shared
 npm run convert    # HTML textbook -> Markdown
+npm run check-books      # every library check that needs no toolchain
+npm run check-books:all  # the above, plus sympy identities and g++ listings
 ```
 
 Verifying a render needs the real application, so:
