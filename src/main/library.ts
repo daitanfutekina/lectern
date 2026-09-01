@@ -154,8 +154,12 @@ async function scanFileBooks(
     names.map(async (name) => {
       try {
         return await readFileBook(path, name, format)
-      } catch {
-        // A DRM-protected or corrupt file must not cost the rest of the shelf.
+      } catch (error) {
+        // A DRM-protected or corrupt file must not cost the rest of the shelf,
+        // but it must not vanish without a word either: this swallowed a
+        // MODULE_NOT_FOUND for pdfjs-dist in the first packaged build, and the
+        // symptom was every PDF quietly refusing to appear.
+        note(name, error)
         return null
       }
     })
@@ -169,6 +173,18 @@ async function scanFileBooks(
  * These are referenced rather than copied, so the id has to survive the file
  * being somewhere outside the library entirely.
  */
+/**
+ * Why a file on the shelf did not become a book.
+ *
+ * One line, not a throw: the shelf has to survive a bad file. But a book that
+ * disappears with no explanation is indistinguishable from a broken
+ * application, which is exactly how a missing dependency presented.
+ */
+function note(name: string, error: unknown): void {
+  process.stderr.write(`library: could not open ${name} -- ${String(error).slice(0, 200)}
+`)
+}
+
 async function scanAddedDocuments(): Promise<Book[]> {
   const entries = await livingDocuments()
   const books = await Promise.all(
@@ -179,7 +195,8 @@ async function scanAddedDocuments(): Promise<Book[]> {
       const format: DocumentFormat = name.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf'
       try {
         return await readFileBook(entry.path.slice(0, entry.path.length - name.length), name, format)
-      } catch {
+      } catch (error) {
+        note(name, error)
         return null
       }
     })

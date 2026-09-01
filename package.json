@@ -12,12 +12,13 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "icons": "node scripts/make-icons.mjs",
-    "package": "npm run build && npm run stage-node && electron-builder --win",
-    "package:dir": "npm run build && npm run stage-node && electron-builder --win --dir",
+    "package": "npm run build && npm run check-package-files && npm run stage-node && electron-builder --win",
+    "package:dir": "npm run build && npm run check-package-files && npm run stage-node && electron-builder --win --dir",
     "test": "vitest run",
     "check-books": "node scripts/check-library.mjs",
     "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp",
-    "stage-node": "node scripts/stage-node.mjs"
+    "stage-node": "node scripts/stage-node.mjs",
+    "check-package-files": "node scripts/runtime-deps.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",

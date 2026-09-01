@@ -73,10 +73,10 @@ and a partial unpack silently splits those apart. It ships **a real
 `node.exe`** beside the application, because the worker cannot run on
 Electron -- V8's sandbox rejects the external buffers the ONNX runtimes
 return, `ELECTRON_RUN_AS_NODE` included. And `files` in
-`electron-builder.yml` is an allowlist of the twenty-eight packages the
-main process actually requires; adding a main-process dependency without
-adding it there gives a packaged app that throws `MODULE_NOT_FOUND` on
-first use.
+`electron-builder.yml` is a generated allowlist of what the main process
+actually requires: `npm run check-package-files` recomputes it and fails if
+the file disagrees. Written by hand it missed `pdfjs-dist`, and the packaged
+build then dropped every PDF on the floor without saying so.
 
 Verifying a render needs the real application, so:
 

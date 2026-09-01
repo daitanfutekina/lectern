@@ -6,25 +6,37 @@ directories:
   output: release
   buildResources: resources
 
-# Only the main process resolves modules at run time. The renderer has none:
-# everything it imports is bundled into out/renderer, and its heavy assets --
-# MathJax, the Tesseract cores and language data, the pdf.js worker, the cmaps
-# and standard fonts -- are vendored under public/ and served over app://. So
-# the npm copies of pdfjs-dist, mathjax, tesseract.js-core and the rest are
-# build inputs that would otherwise ride along a second time and never load.
+# Only the main process and the preload resolve modules at run time. The
+# renderer bundles everything it imports, and its heavy assets -- MathJax, the
+# Tesseract cores and language data, the pdf.js worker, the cmaps and standard
+# fonts -- are vendored under public/ and served over app://, so the npm copies
+# of those are build inputs that would ride along a second time and never load.
 #
-# What is kept is exactly what `out/**` requires by name, plus the transitive
-# closure of those four. Regenerate the list after adding a main-process
-# dependency, or the packaged app throws MODULE_NOT_FOUND on first use:
+# The list below is generated, not remembered. `npm run check-package-files`
+# recomputes it from the built output and fails if this file disagrees; it runs
+# as part of `npm run package` for a reason. Written by hand from a grep for
+# `require("...")`, it missed three packages the bundler had renamed the
+# identifier for --
 #
-#   grep -oh 'require("[^"./][^"]*")' out/{main,main/chunks,preload}/*.js | sort -u
+#   return require$2("pdfjs-dist/legacy/build/pdf.mjs");
+#
+# -- and shipped a build where every PDF dropped on the window silently failed
+# to appear, because the scan reads a failed open as "not a book".
+#
+#   node scripts/runtime-deps.mjs --list
 files:
   - out/**/*
   - resources/**/*
   - package.json
   - '!node_modules/**'
+  # Not the rasteriser it looks like: pdf.js takes globalThis.DOMMatrix from
+  # this, and without it every PDF fails to open with a ReferenceError.
+  - node_modules/@napi-rs/canvas/**
+  - node_modules/@napi-rs/canvas-win32-x64-msvc/**
+  - node_modules/@xmldom/xmldom/**
   - node_modules/adm-zip/**
   - node_modules/boolean/**
+  - node_modules/commander/**
   - node_modules/define-data-property/**
   - node_modules/define-properties/**
   - node_modules/detect-node/**
@@ -42,16 +54,19 @@ files:
   - node_modules/object-keys/**
   - node_modules/onnxruntime-common/**
   - node_modules/onnxruntime-node/**
+  - node_modules/pdfjs-dist/**
   - node_modules/roarr/**
   - node_modules/semver/**
   - node_modules/semver-compare/**
   - node_modules/serialize-error/**
   - node_modules/sherpa-onnx-node/**
   - node_modules/sherpa-onnx-win-x64/**
+  - node_modules/speech-rule-engine/**
   - node_modules/sprintf-js/**
+  - node_modules/temml/**
   - node_modules/type-fest/**
+  - node_modules/wicked-good-xpath/**
   - node_modules/yaml/**
-
   # onnxruntime-node ships every platform it supports: 283 MB of darwin, linux
   # and arm64 binaries for a Windows x64 build. Keep the one that runs.
   - '!node_modules/onnxruntime-node/bin/napi-v6/darwin/**'
