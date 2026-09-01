@@ -242,8 +242,39 @@ export function injectInlineSpeech(element: HTMLElement, speech: string | null):
   element.append(hidden)
 }
 
+/**
+ * The text nodes a block's spoken form is built from.
+ *
+ * `textContent` takes everything beneath the element, and a list item can hold
+ * a code block or a table. `LI` is a leaf here, so the walk never descends far
+ * enough to skip the `<pre>` and the listing was read out line by line --
+ * sixteen items across the library carry one. Filtering at the text nodes
+ * catches it wherever a skipped block is nested inside a leaf, not only lists.
+ *
+ * Every offset in the speech pipeline addresses this same flat string, so the
+ * range and click walks below use the identical filter. They must: a source
+ * built one way and an offset resolved another puts the highlight elsewhere.
+ */
+function spokenWalker(root: HTMLElement): TreeWalker {
+  return document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node: Node) => {
+      for (let p = node.parentElement; p && p !== root; p = p.parentElement) {
+        if (skipReasonFor(p)) return NodeFilter.FILTER_REJECT
+      }
+      return NodeFilter.FILTER_ACCEPT
+    }
+  })
+}
+
+function spokenTextOf(root: HTMLElement): string {
+  const walker = spokenWalker(root)
+  let text = ''
+  while (walker.nextNode()) text += (walker.currentNode as Text).data
+  return text
+}
+
 function addBlock(out: Utterance[], element: HTMLElement, kind: Block['kind']): void {
-  const source = element.textContent ?? ''
+  const source = spokenTextOf(element)
   if (!source.trim()) return
 
   const { text, map } = speakableWithMap(source)
@@ -262,15 +293,15 @@ function addBlock(out: Utterance[], element: HTMLElement, kind: Block['kind']): 
 /**
  * A DOM range covering `[from, to)` of an element's text content.
  *
- * The offsets address `textContent`, which concatenates every descendant text
- * node, so the walk converts a flat offset back into the node and offset a
- * Range needs. Returns null rather than an approximate range: a highlight in
- * the wrong place is worse than none.
+ * The offsets address the block's spoken text, which concatenates its
+ * descendant text nodes minus the skipped ones, so the walk converts a flat
+ * offset back into the node and offset a Range needs. Returns null rather than
+ * an approximate range: a highlight in the wrong place is worse than none.
  */
 export function rangeWithin(element: HTMLElement, from: number, to: number): Range | null {
   if (to <= from) return null
 
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  const walker = spokenWalker(element)
   let seen = 0
   let startNode: Text | null = null
   let startOffset = 0
@@ -329,12 +360,13 @@ export function utteranceRange(utterance: Utterance): Range | null {
 /**
  * Flat character offset of a position inside an element.
  *
- * `textContent` concatenates every descendant text node, and offsets everywhere
- * else in the speech pipeline address that flat string -- so a click, which
- * arrives as a node and an offset within it, has to be converted the same way.
+ * Offsets everywhere else in the speech pipeline address the block's spoken
+ * text -- so a click, which arrives as a node and an offset within it, has to
+ * be converted against the same filtered stream. A click inside a skipped
+ * block lands at the end of the text rather than somewhere arbitrary in it.
  */
 export function flatOffset(element: HTMLElement, node: Node, offset: number): number {
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  const walker = spokenWalker(element)
   let seen = 0
   while (walker.nextNode()) {
     const current = walker.currentNode as Text
