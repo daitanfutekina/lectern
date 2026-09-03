@@ -4,6 +4,7 @@ import {
   START,
   advance,
   bookmarkId,
+  fractionAt,
   fractionRead,
   isFinished,
   parseProgress,
@@ -84,6 +85,39 @@ describe('fractionRead', () => {
   it('counts the furthest block reached, inclusive', () => {
     expect(fractionRead(advance(null, { block: 0, within: 0 }, 4, 0))).toBe(0.25)
     expect(fractionRead(advance(null, { block: 3, within: 0 }, 4, 0))).toBe(1)
+  })
+})
+
+describe('fractionAt', () => {
+  it('is zero with no progress', () => {
+    expect(fractionAt(null)).toBe(0)
+  })
+
+  it('reports where the reader is, not how far they got', () => {
+    expect(fractionAt(advance(null, { block: 0, within: 0 }, 5, 0))).toBe(0)
+    expect(fractionAt(advance(null, { block: 2, within: 0 }, 5, 0))).toBe(0.5)
+    expect(fractionAt(advance(null, { block: 4, within: 0 }, 5, 0))).toBe(1)
+  })
+
+  /*
+    The whole point of this existing. Skim to the end and scroll back and
+    coverage stays full, which is right for the shelf and wrong beside the open
+    chapter -- a bar that cannot come down is not telling you where you are.
+  */
+  it('comes back down after scrolling back, where fractionRead does not', () => {
+    const skimmed = advance(null, { block: 4, within: 0 }, 5, 0)
+    const backNearTop = advance(skimmed, { block: 1, within: 0 }, 5, 1)
+
+    expect(fractionRead(backNearTop)).toBe(1)
+    expect(fractionAt(backNearTop)).toBe(0.25)
+  })
+
+  it('counts part-way into a block', () => {
+    expect(fractionAt(advance(null, { block: 1, within: 0.5 }, 5, 0))).toBe(0.375)
+  })
+
+  it('is complete for a chapter that is a single block', () => {
+    expect(fractionAt(advance(null, { block: 0, within: 0 }, 1, 0))).toBe(1)
   })
 })
 

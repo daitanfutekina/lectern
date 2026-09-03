@@ -7,6 +7,7 @@ import {
   EMPTY_BOOK,
   EMPTY_PROGRESS,
   START,
+  fractionAt,
   fractionRead,
   isFinished,
   type Bookmark,
@@ -234,8 +235,15 @@ function renderSidebar(): void {
 
       // A bar rather than a percentage: the useful question is "roughly where am
       // I", and a number invites precision the measurement does not have.
-      const fraction = fractionRead(chapterProgress)
-      if (fraction > 0) {
+      //
+      // Where the reader *is*, not how far they once got. Coverage only grows,
+      // so one skim to the bottom left this bar full for good and it stopped
+      // saying anything. The `✓` above still answers "have I been through this".
+      const fraction = fractionAt(chapterProgress)
+      // Drawn whenever the chapter has been opened, including at nought. Gating
+      // on the fraction made "opened, sitting at the top" indistinguishable from
+      // "never opened" -- which coverage could never be, since it only grows.
+      if (chapterProgress) {
         const track = element('span', 'progress-track')
         const fill = element('span', 'progress-fill')
         fill.style.width = `${Math.round(fraction * 100)}%`
@@ -309,6 +317,37 @@ function headingLabel(heading: HTMLElement): string {
   return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Which section the reader is inside: the last heading to have reached the top
+ * of the viewport, or -1 while still above the first one.
+ *
+ * Measured the same way block offsets are, subtracting the container's own
+ * position so the answer is in scroll coordinates rather than screen ones.
+ *
+ * "Reached the top" is a band rather than a line. A heading carries a wide top
+ * margin, so scrolling one to the top of the screen leaves its text some tens
+ * of pixels down -- with an exact test, clicking 1.9 in this list scrolled to
+ * 1.9 and then highlighted 1.8, because 1.9's heading had not technically
+ * crossed. A fifth of the viewport is forgiving enough for that and still tight
+ * enough that a heading only counts once it is genuinely at the top of what you
+ * are reading.
+ */
+function sectionAt(headings: readonly HTMLElement[]): number {
+  const container = el<HTMLElement>('content')
+  if (!container) return -1
+
+  const base = container.getBoundingClientRect().top - container.scrollTop
+  const threshold = container.scrollTop + container.clientHeight * 0.2
+
+  let at = -1
+  for (let index = 0; index < headings.length; index += 1) {
+    const top = (headings[index]?.getBoundingClientRect().top ?? 0) - base
+    if (top <= threshold) at = index
+    else break
+  }
+  return at
+}
+
 function appendSections(into: HTMLElement): void {
   const body = chapterBody()
   if (!body) return
@@ -338,10 +377,13 @@ function appendSections(into: HTMLElement): void {
 
   if (!sectionsOpen) return
 
+  const here = sectionAt(found)
+
   const list = element('div', 'section-list')
-  for (const heading of found.slice(0, SECTION_LIMIT)) {
+  for (const [at, heading] of found.slice(0, SECTION_LIMIT).entries()) {
     const link = element('button', 'section-link', headingLabel(heading))
     link.type = 'button'
+    link.setAttribute('aria-current', String(at === here))
     // The element itself, not an index or an id: it is already in hand, it
     // cannot go stale while this list is on screen, and the chapter's headings
     // carry no ids to look up.

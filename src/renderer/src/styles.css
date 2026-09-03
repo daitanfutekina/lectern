@@ -235,6 +235,16 @@ body {
   color: var(--text);
 }
 
+/*
+  The section being read, marked the way the open chapter above it is, but
+  weaker -- the same signal at the same strength twice would leave the eye
+  unsure which of the two it had been given.
+*/
+.section-link[aria-current='true'] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent-2);
+}
+
 .section-more {
   padding: 4px 8px;
   color: var(--text-faint);

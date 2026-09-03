@@ -102,6 +102,30 @@ export function fractionRead(progress: ChapterProgress | null): number {
   return clamp((progress.furthest + 1) / progress.blocks, 0, 1)
 }
 
+/**
+ * Where the reader is *now*, 0 to 1 -- not how much of the chapter they have
+ * seen.
+ *
+ * Distinct from `fractionRead` on purpose, and the two answer different
+ * questions. Coverage only grows, so a chapter skimmed to the bottom keeps a
+ * full bar however far back you scroll afterwards; that is the honest answer to
+ * "how much of this book have I read", which is what the shelf asks. It is the
+ * wrong answer beside an open chapter, where the useful question is "where am I
+ * in this", and a bar pinned high because of one earlier skim answers nothing.
+ *
+ * The `✓` stays on coverage. A finished chapter reopened at the top is still
+ * finished; its bar just says you are at the top of it.
+ */
+export function fractionAt(progress: ChapterProgress | null): number {
+  if (!progress || progress.blocks <= 0) return 0
+  if (progress.blocks === 1) return 1
+
+  const { block, within } = progress.position
+  // Blocks are indexed 0..blocks-1, so the last block is the end of the
+  // chapter rather than one block short of it.
+  return clamp((block + within) / (progress.blocks - 1), 0, 1)
+}
+
 /** A chapter counts as finished once the last block has been reached. */
 export function isFinished(progress: ChapterProgress | null): boolean {
   return progress !== null && progress.blocks > 0 && progress.furthest >= progress.blocks - 1
