@@ -191,6 +191,30 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  /*
+    The handler above only sees `target=_blank` and `window.open`. A plain
+    `<a href>` in a chapter is an ordinary navigation of this window, so it
+    replaced the reader with the linked page -- and the reader has no browser
+    chrome, so the only way back was to quit. Every book format renders its
+    own anchors, which is why this is caught here rather than per renderer.
+  */
+  const appOrigin = process.env['ELECTRON_RENDERER_URL']
+    ? new URL(process.env['ELECTRON_RENDERER_URL']).origin
+    : `${SCHEME}://lectern`
+
+  window.webContents.on('will-navigate', (event, url) => {
+    let origin: string
+    try {
+      origin = new URL(url).origin
+    } catch {
+      return
+    }
+    if (origin === appOrigin) return
+
+    event.preventDefault()
+    if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
+  })
+
   if (process.env['ELECTRON_RENDERER_URL']) {
     void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
