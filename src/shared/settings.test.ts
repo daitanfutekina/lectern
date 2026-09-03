@@ -36,6 +36,23 @@ describe('parseSettings', () => {
     expect(parsed.sort).toBe('added')
   })
 
+  /*
+    The section list defaults to shown, so `false` is the value with something to
+    prove. This is the shape of the shelf-sort bug: a choice that reads back as
+    the default has not been stored at all, and the symptom is a setting that
+    silently forgets itself at every launch rather than an error anyone sees.
+  */
+  it('remembers a collapsed section list', () => {
+    expect(parseSettings('{}').sections).toBe(true)
+    expect(parseSettings(JSON.stringify({ sections: false })).sections).toBe(false)
+    expect(parseSettings(JSON.stringify({ sections: 'no' })).sections).toBe(true)
+  })
+
+  it('carries a collapsed section list through a change to something else', () => {
+    const collapsed = parseSettings(JSON.stringify({ sections: false }))
+    expect(withChange(collapsed, { rate: 1.5 }).sections).toBe(false)
+  })
+
   it('reads the nested voice shape and clamps it', () => {
     const parsed = parseSettings(
       JSON.stringify({ shape: { lengthScale: 9, noiseScale: -1, noiseW: 0.5 } })

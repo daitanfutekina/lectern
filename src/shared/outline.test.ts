@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countWords, extractHeadings, outline, readingMinutes } from './outline'
+import { countWords, extractHeadings, outline, plainMath, readingMinutes } from './outline'
 
 describe('outline', () => {
   it('returns headings with their levels, in document order', () => {
@@ -73,5 +73,28 @@ describe('readingMinutes', () => {
   it('never reports zero, because every chapter takes some time', () => {
     expect(readingMinutes(0)).toBe(1)
     expect(readingMinutes(10)).toBe(1)
+  })
+})
+
+describe('plainMath', () => {
+  it('reduces a bold matrix equation to the characters a person would read', () => {
+    expect(plainMath(String.raw`\mathbf{A}\mathbf{x} = \mathbf{b}`)).toBe('Ax = b')
+  })
+
+  it('keeps plain mathematics untouched', () => {
+    expect(plainMath('x_1 + 2x_3 = -5')).toBe('x_1 + 2x_3 = -5')
+  })
+
+  it('drops sizing commands rather than printing them', () => {
+    expect(plainMath(String.raw`\left[ a \right]`)).toBe('[ a ]')
+  })
+
+  /*
+    A heading made only of mathematics is the case that decides this exists:
+    dropping the equation outright would leave the sidebar an empty row, which
+    is indistinguishable from a bug.
+  */
+  it('leaves something behind for a heading that is only an equation', () => {
+    expect(plainMath(String.raw`\mathbf{A}\mathbf{x} = \mathbf{0}`)).toBe('Ax = 0')
   })
 })

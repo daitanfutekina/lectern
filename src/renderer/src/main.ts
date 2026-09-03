@@ -1,7 +1,7 @@
 import './styles.css'
 import { renderMarkdown } from '@shared/markdown'
 import { splitFrontMatter } from '@shared/manifest'
-import { readingMinutes } from '@shared/outline'
+import { plainMath, readingMinutes } from '@shared/outline'
 import { EMPTY_INDEX, findBook, nextChapter, previousChapter } from '@shared/library'
 import {
   EMPTY_BOOK,
@@ -76,6 +76,18 @@ let settings: Settings = DEFAULT_SETTINGS
  * which nothing wrote -- so the choice never survived a restart.
  */
 let shelfSort: ShelfSort = DEFAULT_SETTINGS.sort
+
+/** Whether the open chapter's section list is expanded. Remembered like the sort. */
+let sectionsOpen: boolean = DEFAULT_SETTINGS.sections
+
+/**
+ * How many sections to list before saying how many are left.
+ *
+ * Most chapters have seven to eleven. Godot's largest has 67, and past a point
+ * the list stops being something you scan and becomes something you scroll past
+ * to reach the next chapter. Same cap, and the same reason, as the index export.
+ */
+const SECTION_LIMIT = 40
 
 /** When each added document joined the library, for "recently added". */
 const addedTimes = new Map<string, number>()
@@ -239,6 +251,11 @@ function renderSidebar(): void {
       button.dataset['chapter'] = chapter.file
       button.addEventListener('click', () => void open(book.id, chapter.file))
       books.append(button)
+
+      // Only the open chapter's, for the same reason the sidebar lists only the
+      // open book's chapters: every chapter's sections at once is a table of
+      // contents, and that is a different screen.
+      if (isCurrent) appendSections(books)
     }
   }
 
@@ -250,6 +267,93 @@ function renderSidebar(): void {
   }
 
   renderBookmarks()
+}
+
+/**
+ * The open chapter's sections, listed under it and collapsible.
+ *
+ * Read from the rendered body rather than from the library index. The sidebar
+ * only ever lists the chapter that is on screen, so the DOM is there to be read
+ * and it is exact. Going through the index would mean assuming the Nth `##` in
+ * the source is the Nth `<h2>` on the page -- true today, and the kind of
+ * assumption whose failure is a silent jump to the wrong heading rather than an
+ * error.
+ *
+ * Reading `.chapter-body` also scopes this to our own books without a format
+ * check: an EPUB renders inside its own frame and a PDF has no chapter body, so
+ * both simply produce no list.
+ */
+/**
+ * A heading's text, with any equation in it reduced to readable characters.
+ *
+ * A typeset equation is no use to `textContent` twice over: MathJax draws the
+ * glyphs as SVG paths, which hold no text at all, and adds an
+ * `mjx-assistive-mml` copy for screen readers, which holds too much. Reading the
+ * heading raw returned "1.4 Matrix Equation Ax=bbold A bold x equals bold b";
+ * deleting the assistive copy returned "1.4 Matrix Equation", silently dropping
+ * the equation, which would leave a heading made only of mathematics blank.
+ *
+ * So neither rendering is read. The source LaTeX is still on the element, put
+ * there by `renderMarkdown`, and stripping its formatting commands leaves the
+ * characters a person would say: `\mathbf{A}\mathbf{x} = \mathbf{b}` -> `Ax = b`.
+ */
+function headingLabel(heading: HTMLElement): string {
+  const copy = heading.cloneNode(true) as HTMLElement
+
+  for (const math of copy.querySelectorAll<HTMLElement>('[data-latex]')) {
+    math.replaceWith(document.createTextNode(plainMath(math.dataset['latex'] ?? '')))
+  }
+  // Any equation MathJax typeset in place, with no `data-latex` to fall back on.
+  for (const assistive of copy.querySelectorAll('mjx-assistive-mml')) assistive.remove()
+
+  return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function appendSections(into: HTMLElement): void {
+  const body = chapterBody()
+  if (!body) return
+
+  const found = [...body.querySelectorAll<HTMLElement>('h2')]
+  if (found.length === 0) return
+
+  const toggle = element('button', 'section-toggle')
+  toggle.type = 'button'
+  toggle.setAttribute('aria-expanded', String(sectionsOpen))
+  // The solid triangles, not the small ones: `▾` and `▸` fall back to a glyph
+  // barely distinguishable from a full stop at this size.
+  toggle.append(element('span', 'section-chevron', sectionsOpen ? '▼' : '▶'))
+  toggle.append(
+    element('span', undefined, `${found.length} section${found.length === 1 ? '' : 's'}`)
+  )
+  toggle.addEventListener('click', () => {
+    sectionsOpen = !sectionsOpen
+    // Not through `changeSettings`: that re-applies the voice and restarts
+    // speech preparation, and folding a list away needs neither.
+    void window.lectern.settings.set({ sections: sectionsOpen }).then((updated) => {
+      settings = updated
+    })
+    renderSidebar()
+  })
+  into.append(toggle)
+
+  if (!sectionsOpen) return
+
+  const list = element('div', 'section-list')
+  for (const heading of found.slice(0, SECTION_LIMIT)) {
+    const link = element('button', 'section-link', headingLabel(heading))
+    link.type = 'button'
+    // The element itself, not an index or an id: it is already in hand, it
+    // cannot go stale while this list is on screen, and the chapter's headings
+    // carry no ids to look up.
+    link.addEventListener('click', () => {
+      heading.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    })
+    list.append(link)
+  }
+  if (found.length > SECTION_LIMIT) {
+    list.append(element('span', 'section-more', `…${found.length - SECTION_LIMIT} more`))
+  }
+  into.append(list)
 }
 
 function renderBookmarks(): void {
@@ -430,6 +534,12 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   // Typeset before restoring: equations change block heights substantially, and
   // restoring against pre-typeset geometry lands in the wrong place.
   await typeset(rendered)
+
+  // Again, now the body exists and its equations are typeset. The first call ran
+  // before the chapter was fetched, so it had no headings to list, and running
+  // before typesetting would read `\(\mathbf{A}\mathbf{x}\)` out of a heading
+  // rather than the equation.
+  renderSidebar()
 
   const stored = bookProgress(bookId).chapters[file]
   const target = at ?? stored?.position ?? START
@@ -1342,6 +1452,7 @@ function applySettings(): void {
     reader.setVoice(settings.voiceId)
   }
   shelfSort = settings.sort
+  sectionsOpen = settings.sections
 }
 
 /**

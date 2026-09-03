@@ -63,6 +63,9 @@ export interface Settings {
 
   /* Shelf */
   readonly sort: ShelfSort
+
+  /** Whether the sidebar lists the open chapter's sections. */
+  readonly sections: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -83,7 +86,8 @@ export const DEFAULT_SETTINGS: Settings = {
   math: DEFAULT_GATE,
   ocrDpi: 300,
   ocrAuto: true,
-  sort: 'added'
+  sort: 'added',
+  sections: true
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -149,7 +153,8 @@ export function parseSettings(source: string): Settings {
     // page doubles for no gain worth having.
     ocrDpi: num(raw['ocrDpi'], 300, 150, 450),
     ocrAuto: bool(raw['ocrAuto'], true),
-    sort: isShelfSort(raw['sort']) ? raw['sort'] : 'added'
+    sort: isShelfSort(raw['sort']) ? raw['sort'] : 'added',
+    sections: bool(raw['sections'], true)
   }
 }
 

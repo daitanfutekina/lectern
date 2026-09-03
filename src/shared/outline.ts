@@ -47,6 +47,25 @@ function plain(text: string): string {
     .trim()
 }
 
+/**
+ * LaTeX with its formatting commands removed, keeping what they wrapped.
+ *
+ * For labelling an equation in a list, where the equation itself cannot be
+ * drawn: `\mathbf{A}\mathbf{x} = \mathbf{b}` becomes `Ax = b`. This is not a
+ * renderer and must not become one -- anything it cannot reduce to characters
+ * it drops, because a sidebar entry reading `\frac` is worse than one reading
+ * nothing.
+ */
+export function plainMath(latex: string): string {
+  return latex
+    .replace(/\\(?:math[a-z]+|text|operatorname|bm)\s*\{([^{}]*)\}/g, '$1')
+    .replace(/\\left|\\right/g, '')
+    .replace(/\\[a-zA-Z]+/g, '')
+    .replace(/[{}$]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export interface Heading {
   readonly level: number
   readonly text: string
