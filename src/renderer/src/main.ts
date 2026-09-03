@@ -31,7 +31,7 @@ import { DEFAULT_SETTINGS, type Settings } from '@shared/settings'
 import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { hasCover, renderHome, setCover } from './home'
-import { isShelfSort, type ShelfSort } from '@shared/shelf'
+import { type ShelfSort } from '@shared/shelf'
 import { pdfCover, renderBook, type PdfView } from './pdf-view'
 import { renderEpub } from './epub-view'
 import type { PrepareProgress } from '@shared/speech-cache'
@@ -68,20 +68,17 @@ let flagging: HTMLElement | null = null
 /** Everything the reader can change, loaded once at startup. */
 let settings: Settings = DEFAULT_SETTINGS
 
-/** How the shelf is ordered, remembered between sessions. */
-let shelfSort: ShelfSort = readStoredSort()
+/**
+ * How the shelf is ordered, remembered between sessions.
+ *
+ * Settings is the only store. It was also kept in localStorage, and
+ * `applySettings` overwrote that copy with `settings.sort` at every launch --
+ * which nothing wrote -- so the choice never survived a restart.
+ */
+let shelfSort: ShelfSort = DEFAULT_SETTINGS.sort
 
 /** When each added document joined the library, for "recently added". */
 const addedTimes = new Map<string, number>()
-
-function readStoredSort(): ShelfSort {
-  try {
-    const stored = localStorage.getItem('lectern.shelfSort')
-    return isShelfSort(stored) ? stored : 'added'
-  } catch {
-    return 'added'
-  }
-}
 
 /**
  * Zoom multiplier for the PDF view, on top of fitting the page to the pane.
@@ -1133,11 +1130,11 @@ function showHome(): void {
       },
       onSort: (sort) => {
         shelfSort = sort
-        try {
-          localStorage.setItem('lectern.shelfSort', sort)
-        } catch {
-          // A preference that cannot be stored is still worth honouring now.
-        }
+        // Not through `changeSettings`: that re-applies the voice and restarts
+        // speech preparation, and reordering the shelf needs neither.
+        void window.lectern.settings.set({ sort }).then((updated) => {
+          settings = updated
+        })
         showHome()
       }
     }
