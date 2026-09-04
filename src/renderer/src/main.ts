@@ -191,6 +191,15 @@ function renderSidebar(): void {
   const meta = el<HTMLElement>('library-meta')
   if (!books) return
 
+  /*
+    This runs on every scroll-driven position report, and replacing the list
+    resets where it is scrolled to. On a seven-chapter book the list fits and
+    there is nothing to lose; the Godot book lists 117 and the sidebar jumped
+    back to the top on every scroll of the chapter, which reads as the sidebar
+    scrolling by itself.
+  */
+  const scrolled = books.scrollTop
+
   books.replaceChildren()
 
   if (!current) {
@@ -266,6 +275,9 @@ function renderSidebar(): void {
       if (isCurrent) appendSections(books)
     }
   }
+
+  // After the list is rebuilt, so there is something to scroll back to.
+  books.scrollTop = scrolled
 
   if (meta) {
     const chapters = index.books.reduce((total, book) => total + book.chapters.length, 0)
