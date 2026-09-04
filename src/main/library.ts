@@ -98,6 +98,7 @@ async function readBook(booksPath: string, id: string): Promise<Book | null> {
     format,
     path,
     chapters,
+    parts: manifest.parts,
     macros: manifest.macros
   }
 }
@@ -122,6 +123,7 @@ async function readFileBook(dir: string, name: string, format: DocumentFormat): 
       format,
       path,
       chapters: book.chapters,
+      parts: [],
       macros: {}
     }
   }
@@ -136,6 +138,7 @@ async function readFileBook(dir: string, name: string, format: DocumentFormat): 
     format,
     path,
     chapters: book.chapters,
+    parts: [],
     macros: {}
   }
 }

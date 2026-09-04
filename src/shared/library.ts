@@ -6,6 +6,10 @@
  * no methods, no Date objects that anyone relies on being a Date.
  */
 
+import type { BookPart } from './manifest'
+
+export type { BookPart }
+
 /** What kind of thing a document is, which decides the adapter that reads it. */
 export type DocumentFormat = 'markdown' | 'html' | 'epub' | 'pdf'
 
@@ -29,6 +33,11 @@ export interface Book {
   /** Absolute path to the book folder. */
   readonly path: string
   readonly chapters: readonly Chapter[]
+  /**
+   * Named chapter groups, empty for a book that declares none. A view over
+   * `chapters`, which stays the reading order either way.
+   */
+  readonly parts: readonly BookPart[]
   /**
    * Book-scoped LaTeX macro definitions. SPEC section 4 and FINDINGS: these were
    * defined per-chapter and inconsistently in the source books, and an

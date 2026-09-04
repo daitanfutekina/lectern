@@ -186,6 +186,56 @@ function recordHere(): void {
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
 
+/**
+ * A book's chapters, grouped by the parts it declares.
+ *
+ * A book that declares none yields one untitled group, which renders exactly as
+ * the flat list always did -- that is what keeps this off the six-chapter
+ * books, where thirteen headings over seven entries would be worse than none.
+ *
+ * Anything the parts do not mention is appended in reading order rather than
+ * dropped. A manifest is edited by hand, and a chapter silently vanishing from
+ * the sidebar because of a typo in a part is a far worse failure than an
+ * ungrouped chapter at the end.
+ */
+function groupChapters(book: Book): { title: string | null; chapters: Chapter[] }[] {
+  if (book.parts.length === 0) return [{ title: null, chapters: [...book.chapters] }]
+
+  const byFile = new Map(book.chapters.map((c) => [c.file, c]))
+  const placed = new Set<string>()
+  const groups: { title: string | null; chapters: Chapter[] }[] = book.parts.map((part) => {
+    const chapters: Chapter[] = []
+    for (const file of part.chapters) {
+      const chapter = byFile.get(file)
+      if (chapter && !placed.has(file)) {
+        chapters.push(chapter)
+        placed.add(file)
+      }
+    }
+    return { title: part.title, chapters }
+  })
+
+  const rest = book.chapters.filter((c) => !placed.has(c.file))
+  if (rest.length > 0) groups.push({ title: null, chapters: rest })
+  return groups.filter((g) => g.chapters.length > 0)
+}
+
+/**
+ * Whether a chapter is a continuation of the one numbered before it, indented
+ * so a walkthrough split across nine files reads as one thing.
+ *
+ * Taken from the file name because that is where the relationship already
+ * lives: `godot_ch70a_scene_setup.md` is part of chapter 70 whatever its title
+ * says. Only true when the parent is actually in the book -- a lone `ch15a`
+ * with no `ch15` is a chapter in its own right.
+ */
+function isSubChapter(book: Book, chapter: Chapter): boolean {
+  const mine = /^(.*_(?:p\d+)?ch\d+)[a-z]+_/i.exec(chapter.file)
+  if (!mine) return false
+  const parentPrefix = `${mine[1]}_`
+  return book.chapters.some((c) => c.file.startsWith(parentPrefix))
+}
+
 function renderSidebar(): void {
   const books = el<HTMLElement>('books')
   const meta = el<HTMLElement>('library-meta')
@@ -224,9 +274,12 @@ function renderSidebar(): void {
     books.append(element('div', 'book-title', book.title))
     const stored = bookProgress(book.id)
 
-    for (const chapter of book.chapters) {
+    for (const group of groupChapters(book)) {
+      if (group.title) books.append(element('div', 'part-title', group.title))
+
+    for (const chapter of group.chapters) {
       const chapterProgress = stored.chapters[chapter.file] ?? null
-      const button = element('button', 'chapter-link')
+      const button = element('button', isSubChapter(book, chapter) ? 'chapter-link sub' : 'chapter-link')
       button.type = 'button'
 
       const row = element('span', 'chapter-row')
@@ -273,6 +326,7 @@ function renderSidebar(): void {
       // open book's chapters: every chapter's sections at once is a table of
       // contents, and that is a different screen.
       if (isCurrent) appendSections(books)
+    }
     }
   }
 

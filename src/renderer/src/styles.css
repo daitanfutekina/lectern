@@ -142,6 +142,30 @@ body {
   letter-spacing: 0.06em;
 }
 
+/*
+  A part heading, for the books long enough to declare parts. Lighter than
+  .book-title, which sits above it and names the whole book -- two headings of
+  equal weight read as two books.
+*/
+.part-title {
+  overflow-wrap: anywhere;
+  padding: 14px 8px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.part-title:first-child {
+  padding-top: 4px;
+}
+
+/* A continuation of the chapter above it -- ch70a under ch70. */
+.chapter-link.sub {
+  padding-left: 22px;
+}
+
 .chapter-link {
   display: block;
   overflow-wrap: anywhere;

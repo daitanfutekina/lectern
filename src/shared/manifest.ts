@@ -7,10 +7,25 @@ import { parse as parseYaml } from 'yaml'
  * it is untrusted input like any config: a missing field must degrade, never
  * throw. SPEC section 2.
  */
+/**
+ * A named group of chapters, for a book long enough that a flat list stops
+ * being navigable.
+ *
+ * Optional on purpose: a book that declares no parts reads exactly as it did
+ * before. The Godot book lists 109 chapters across thirteen parts and is the
+ * reason this exists; the six-chapter books would be worse for the grouping,
+ * not better, so nothing imposes it on them.
+ */
+export interface BookPart {
+  readonly title: string
+  readonly chapters: readonly string[]
+}
+
 export interface BookManifest {
   readonly title: string | null
   readonly index: string | null
   readonly chapters: readonly string[]
+  readonly parts: readonly BookPart[]
   readonly macros: Readonly<Record<string, string>>
 }
 
@@ -18,6 +33,7 @@ export const EMPTY_MANIFEST: BookManifest = {
   title: null,
   index: null,
   chapters: [],
+  parts: [],
   macros: {}
 }
 
@@ -50,6 +66,28 @@ function macroMap(value: unknown): Record<string, string> {
   return macros
 }
 
+/**
+ * Parts, dropping any that name no chapter that survived `chapterList`.
+ *
+ * A part is a view over the reading order, never a second source of it: the
+ * `chapters:` list stays authoritative, so a chapter missing from every part
+ * still appears and a chapter named by a part it does not contain is ignored.
+ * Getting that backwards would let a typo in a part title hide a chapter.
+ */
+function partList(value: unknown, chapters: readonly string[]): BookPart[] {
+  if (!Array.isArray(value)) return []
+  const known = new Set(chapters)
+  const parts: BookPart[] = []
+
+  for (const entry of value) {
+    if (!isRecord(entry)) continue
+    const title = str(entry['title'])
+    const files = chapterList(entry['chapters']).filter((f) => known.has(f))
+    if (title && files.length > 0) parts.push({ title, chapters: files })
+  }
+  return parts
+}
+
 export function parseManifest(source: string): BookManifest {
   let raw: unknown
   try {
@@ -63,10 +101,12 @@ export function parseManifest(source: string): BookManifest {
 
   if (!isRecord(raw)) return EMPTY_MANIFEST
 
+  const chapters = chapterList(raw['chapters'])
   return {
     title: str(raw['title']),
     index: str(raw['index']),
-    chapters: chapterList(raw['chapters']),
+    chapters,
+    parts: partList(raw['parts'], chapters),
     macros: macroMap(raw['macros'])
   }
 }
