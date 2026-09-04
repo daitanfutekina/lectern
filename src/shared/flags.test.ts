@@ -101,6 +101,17 @@ describe('flagsToMarkdown', () => {
     expect(out).toContain('I could not follow the jump here.')
   })
 
+  /*
+    The editor kind has to survive the round trip like any other: it is the one
+    the reader reaches for when the sentence is correct and they still cannot
+    do what it says, which no check in this repository can find for them.
+  */
+  it('keeps the editor kind through parse and export', () => {
+    const store = parseFlags(JSON.stringify({ flags: [{ ...flag(), kind: 'lost' }] }))
+    expect(store.flags[0]?.kind).toBe('lost')
+    expect(flagsToMarkdown([flag({ kind: 'lost' })], titleOf)).toContain("Can't find it")
+  })
+
   it('labels the kind', () => {
     expect(flagsToMarkdown([flag({ kind: 'thin' })], titleOf)).toContain('Too thin')
     expect(flagsToMarkdown([flag({ kind: 'good' })], titleOf)).toContain('Worked well')
