@@ -143,22 +143,45 @@ body {
 }
 
 /*
-  A part heading, for the books long enough to declare parts. Lighter than
-  .book-title, which sits above it and names the whole book -- two headings of
-  equal weight read as two books.
+  A part, for the books long enough to declare them. Folds like the section
+  list below it and borrows its chevron, because they are the same gesture and
+  two different disclosure affordances in one column would be worse than none.
+
+  Heavier than .section-toggle and lighter than .book-title: the book name sits
+  above all of these and a part that matched it would read as a second book.
 */
-.part-title {
-  overflow-wrap: anywhere;
-  padding: 14px 8px 4px;
+.part-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 8px 5px;
+  border: 0;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
+  font: inherit;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  opacity: 0.75;
+  letter-spacing: 0.03em;
+  text-align: left;
+  cursor: pointer;
 }
 
-.part-title:first-child {
-  padding-top: 4px;
+.part-toggle:hover {
+  color: var(--text);
+}
+
+.part-name {
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+/* How much is folded away, so a collapsed part still says how big it is. */
+.part-count {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A continuation of the chapter above it -- ch70a under ch70. */

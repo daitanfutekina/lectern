@@ -187,6 +187,29 @@ function recordHere(): void {
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
 
+/**
+ * Parts the reader has folded away from where they would sit by default.
+ *
+ * The default is that the part holding the open chapter is expanded and the
+ * rest are not, which is what makes grouping worth having: 109 chapters
+ * collapse to fourteen rows and the one you are inside stays open. Only the
+ * departures from that need remembering, so a reader who never touches a
+ * chevron always gets the useful arrangement, including after moving to a
+ * chapter in a different part.
+ *
+ * Session-scoped on purpose. Persisting it would mean a schema for something
+ * the default already gets right at every launch.
+ */
+const partsFolded = new Set<string>()
+
+const partIsOpen = (title: string, holdsCurrent: boolean): boolean =>
+  partsFolded.has(title) ? !holdsCurrent : holdsCurrent
+
+function togglePart(title: string): void {
+  if (partsFolded.has(title)) partsFolded.delete(title)
+  else partsFolded.add(title)
+}
+
 function renderSidebar(): void {
   const books = el<HTMLElement>('books')
   const meta = el<HTMLElement>('library-meta')
@@ -226,7 +249,26 @@ function renderSidebar(): void {
     const stored = bookProgress(book.id)
 
     for (const group of groupChapters(book)) {
-      if (group.title) books.append(element('div', 'part-title', group.title))
+      if (group.title) {
+        const holdsCurrent = group.chapters.some(
+          (c) => current?.bookId === book.id && current.file === c.file
+        )
+        const open = partIsOpen(group.title, holdsCurrent)
+
+        const toggle = element('button', 'part-toggle')
+        toggle.type = 'button'
+        toggle.setAttribute('aria-expanded', String(open))
+        toggle.append(element('span', 'section-chevron', open ? '▼' : '▶'))
+        toggle.append(element('span', 'part-name', group.title))
+        toggle.append(element('span', 'part-count', String(group.chapters.length)))
+        toggle.addEventListener('click', () => {
+          togglePart(group.title as string)
+          renderSidebar()
+        })
+        books.append(toggle)
+
+        if (!open) continue
+      }
 
     for (const chapter of group.chapters) {
       const chapterProgress = stored.chapters[chapter.file] ?? null
