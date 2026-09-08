@@ -554,65 +554,96 @@ details.box[open] > summary::before {
   border-left-color: var(--danger);
 }
 
-/* ── Figures ───────────────────────────────────────────────────────────
+/* ── Figures ─────────────────────────────────────────────
    A book carries a diagram's geometry and nothing else. Every colour, weight
    and type size is set here, once, so that a figure cannot drift away from the
    application the way the old per-file stylesheets did (SPEC section 3). A
-   chapter writes <svg> with these classes and no attributes of its own. */
+   chapter writes <svg> with these classes and no attributes of its own.
+
+   A diagram sits on its own card rather than directly on the page: against the
+   reading background a thin stroked curve reads as a smudge, and the reader
+   cannot tell where the picture ends and the prose resumes. */
 
 figure.fig {
-  margin: 1.6em 0;
+  margin: 1.8em 0;
+  padding: 1.1rem 1rem 0.85rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   text-align: center;
 }
 
 figure.fig svg {
   display: block;
-  max-width: 100%;
+  width: 100%;
+  max-width: 340px;
   height: auto;
   margin: 0 auto;
   overflow: visible;
 }
 
 figure.fig figcaption {
-  margin-top: 0.6em;
+  margin-top: 0.85em;
+  padding-top: 0.7em;
+  border-top: 1px solid var(--border-soft);
   color: var(--text-muted);
   font-size: 0.9em;
-  line-height: 1.5;
+  line-height: 1.55;
+  text-align: left;
 }
 
-/* A row of small curve thumbnails: the polar field guide, the limaçon cases. */
+/* A row of curve thumbnails: the polar field guide, the limacon cases. */
 .fig-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.4em 1em;
-  margin: 1.6em 0;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 0.9em;
+  margin: 1.8em 0;
 }
 
 .fig-grid figure.fig {
   margin: 0;
+  padding: 0.8rem 0.7rem 0.6rem;
+}
+
+.fig-grid figure.fig svg {
+  max-width: 200px;
 }
 
 .fig-grid figure.fig figcaption {
-  font-size: 0.82em;
+  margin-top: 0.6em;
+  padding-top: 0.55em;
+  font-size: 0.83em;
+  text-align: center;
 }
 
 /* Semantic parts of a diagram. Geometry in the book, appearance here. */
-.fig-axis {
+.fig-gridline {
   fill: none;
   stroke: var(--border);
-  stroke-width: 1;
+  stroke-width: 0.6;
+  opacity: 0.55;
 }
 
-.fig-grid-line {
+.fig-axis {
   fill: none;
-  stroke: var(--border-soft);
-  stroke-width: 0.75;
+  stroke: var(--text-faint);
+  stroke-width: 1.1;
 }
+
+/* Each figure names a hue; what the hue is worth is decided here. Six is
+   enough that a field guide of fourteen thumbnails is varied without any two
+   neighbours colliding. */
+.fig-hue-1 { --fig-ink: var(--accent); }
+.fig-hue-2 { --fig-ink: var(--violet); }
+.fig-hue-3 { --fig-ink: var(--success); }
+.fig-hue-4 { --fig-ink: var(--warn); }
+.fig-hue-5 { --fig-ink: #ff7bd5; }
+.fig-hue-6 { --fig-ink: #4fd6c8; }
 
 .fig-curve {
   fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
+  stroke: var(--fig-ink, var(--accent));
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -620,7 +651,7 @@ figure.fig figcaption {
 .fig-curve-alt {
   fill: none;
   stroke: var(--violet);
-  stroke-width: 2;
+  stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -628,42 +659,43 @@ figure.fig figcaption {
 .fig-guide {
   fill: none;
   stroke: var(--text-faint);
-  stroke-width: 1;
+  stroke-width: 1.2;
   stroke-dasharray: 4 3;
 }
 
 .fig-fill {
-  fill: var(--accent);
-  fill-opacity: 0.18;
+  fill: var(--fig-ink, var(--accent));
+  fill-opacity: 0.22;
   stroke: none;
 }
 
 .fig-fill-alt {
   fill: var(--violet);
-  fill-opacity: 0.18;
+  fill-opacity: 0.2;
   stroke: none;
 }
 
 .fig-point {
-  fill: var(--accent);
-  stroke: none;
+  fill: var(--fig-ink, var(--accent));
+  stroke: var(--bg-elev);
+  stroke-width: 1.2;
 }
 
 .fig-arrow {
-  fill: var(--accent);
+  fill: var(--fig-ink, var(--accent));
   stroke: none;
 }
 
 .fig-label {
   fill: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 9px;
+  font-size: 9.5px;
 }
 
 .fig-label-em {
   fill: var(--text);
   font-family: var(--font-sans);
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 /* ── Mathematics ───────────────────────────────────────────────────── */
