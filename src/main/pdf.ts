@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { assemblePage, cleanPage, repeatedLines, type TextItem } from '@shared/pdf-text'
-import type { Chapter } from '@shared/library'
+import type { BookPart, Chapter } from '@shared/library'
 
 /**
  * Reading a digital PDF. SPEC section 3.
@@ -45,6 +45,8 @@ const DIGITAL_CHARS_PER_PAGE = 120
 export interface PdfBook {
   readonly document: PdfDocument
   readonly chapters: readonly Chapter[]
+  /** Named chapter groups the outline declares, empty when it declares none. */
+  readonly parts: readonly BookPart[]
   /** First and last page, inclusive and 1-based, per chapter file id. */
   readonly ranges: Readonly<Record<string, { from: number; to: number }>>
   readonly digital: boolean
@@ -91,13 +93,15 @@ export async function openPdf(path: string): Promise<PdfBook> {
   const digital = await hasTextLayer(document)
 
   const ranges: Record<string, { from: number; to: number }> = {}
-  const chapters = (await outlineChapters(document)) ?? chunkChapters(document.numPages)
+  const outlined = await outlineChapters(document)
+  const chapters = outlined?.chapters ?? chunkChapters(document.numPages)
+  const parts = outlined?.parts ?? []
   for (const chapter of chapters) {
     const parsed = /^p(\d+)-(\d+)$/.exec(chapter.file)
     if (parsed) ranges[chapter.file] = { from: Number(parsed[1]), to: Number(parsed[2]) }
   }
 
-  const book: PdfBook = { document, chapters, ranges, digital, pages: document.numPages }
+  const book: PdfBook = { document, chapters, parts, ranges, digital, pages: document.numPages }
   opened.set(path, book)
   return book
 }
@@ -122,7 +126,9 @@ async function hasTextLayer(document: PdfDocument): Promise<boolean> {
  * table of contents it is a book. Only the top level is used -- a three-deep
  * outline makes a chapter list nobody can scan.
  */
-async function outlineChapters(document: PdfDocument): Promise<Chapter[] | null> {
+async function outlineChapters(
+  document: PdfDocument
+): Promise<{ chapters: Chapter[]; parts: BookPart[] } | null> {
   let outline: OutlineEntry[] | null = null
   try {
     outline = await document.getOutline()
@@ -131,25 +137,36 @@ async function outlineChapters(document: PdfDocument): Promise<Chapter[] | null>
   }
   if (!outline || outline.length < 2) return null
 
-  const starts: { title: string; page: number; sections: string[] }[] = []
-  for (const entry of outline) {
+  const starts: { title: string; page: number; sections: string[]; part: string | null }[] = []
+
+  const record = async (entry: OutlineEntry, part: string | null): Promise<void> => {
     const page = await pageOf(document, entry.dest)
-    if (page === null) continue
+    if (page === null) return
     starts.push({
       title: cleanTitle(entry.title) || `Page ${page}`,
       page,
       // The level below is the chapter's sections. The chapter list stays flat
-      // -- SPEC section 3, a three-deep list is one nobody can scan -- but
-      // discarding the children entirely left every PDF in the library without
-      // a section list, however carefully the publisher had built one.
-      sections: (entry.items ?? []).map((item) => cleanTitle(item.title)).filter(Boolean)
+      // -- a three-deep list is one nobody can scan -- but discarding the
+      // children entirely left every PDF in the library without a section
+      // list, however carefully the publisher had built one.
+      sections: (entry.items ?? []).map((item) => cleanTitle(item.title)).filter(Boolean),
+      part
     })
+  }
+
+  for (const entry of outline) {
+    if (isPart(entry)) {
+      const title = cleanTitle(entry.title)
+      for (const child of entry.items ?? []) await record(child, title)
+    } else {
+      await record(entry, null)
+    }
   }
 
   starts.sort((a, b) => a.page - b.page)
   if (starts.length < 2) return null
 
-  return starts.map((start, at) => {
+  const chapters = starts.map((start, at) => {
     const to = at + 1 < starts.length ? (starts[at + 1]?.page ?? document.numPages) - 1 : document.numPages
     const from = start.page
     return {
@@ -160,6 +177,41 @@ async function outlineChapters(document: PdfDocument): Promise<Chapter[] | null>
       words: Math.max(1, (Math.max(from, to) - from + 1)) * 300
     }
   })
+
+  // Parts in reading order, each naming the chapters it covers. The sidebar
+  // already knows how to fold a book up by these.
+  const parts: { title: string; chapters: string[] }[] = []
+  for (const [at, start] of starts.entries()) {
+    if (!start.part) continue
+    const file = chapters[at]?.file
+    if (!file) continue
+    const last = parts[parts.length - 1]
+    if (last && last.title === start.part) last.chapters.push(file)
+    else parts.push({ title: start.part, chapters: [file] })
+  }
+
+  return { chapters, parts }
+}
+
+/**
+ * Whether an outline entry is a part rather than a chapter.
+ *
+ * A part's children are chapters and have sections of their own; a chapter's
+ * children are sections and are leaves. So: most children having children
+ * means a part. Taking only the top level made "Part I" a single 637-page
+ * chapter of Computer Systems: A Programmer's Perspective and buried chapters
+ * 2 to 6 inside it, while flattening a level unconditionally would have
+ * dissolved the 22 real chapters of Computer Science: An Overview into a
+ * hundred sections.
+ *
+ * The majority is what makes it hold: that book's Chapter 1 has ten children
+ * of which four carry subsections, and it is a chapter.
+ */
+function isPart(entry: OutlineEntry): boolean {
+  const children = entry.items ?? []
+  if (children.length === 0) return false
+  const nested = children.filter((child) => (child.items ?? []).length > 0).length
+  return nested * 2 > children.length
 }
 
 /**

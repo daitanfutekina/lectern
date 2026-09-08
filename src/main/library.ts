@@ -138,7 +138,9 @@ async function readFileBook(dir: string, name: string, format: DocumentFormat): 
     format,
     path,
     chapters: book.chapters,
-    parts: [],
+    // A textbook that declares parts is grouped by them, the same as one of
+    // ours that declares them in its manifest.
+    parts: book.parts,
     macros: {}
   }
 }
