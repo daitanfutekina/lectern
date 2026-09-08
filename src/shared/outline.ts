@@ -88,14 +88,26 @@ export function extractHeadings(source: string): string[] {
 }
 
 /**
- * Words of prose, ignoring mathematics, code and directive syntax, so a chapter
- * of dense algebra is not reported as longer than a chapter of prose.
+ * Words of prose, ignoring mathematics, code, diagrams and directive syntax, so
+ * a chapter of dense algebra is not reported as longer than a chapter of prose.
+ *
+ * A diagram is dropped whole rather than merely stripped of its tags. Sampled
+ * path data is thousands of `L` commands, and `[A-Za-z]` counts every one of
+ * them: the first chapter to carry figures reported 48,000 words against a real
+ * 8,000. Its <figcaption> is prose and is counted, which is the same line the
+ * speech pipeline draws.
  */
 export function countWords(source: string): number {
   const prose = proseLines(source)
     .join('\n')
+    // Mathematics goes first. `$a < b$ ... $r > 0$` is ordinary prose with two
+    // stray angle brackets in it, and a tag-stripping pass run before the maths
+    // is removed matches from the first `<` to the next `>` and swallows the
+    // sentence between them.
     .replace(/\$\$[\s\S]*?\$\$/g, ' ')
     .replace(/\$[^$\n]*\$/g, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
     .replace(/^:{3,}.*$/gm, ' ')
   return (prose.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length
 }

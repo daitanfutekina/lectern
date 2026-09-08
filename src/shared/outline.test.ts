@@ -51,6 +51,40 @@ describe('countWords', () => {
     expect(countWords('one two three')).toBe(3)
   })
 
+  /*
+    The chapter that first carried figures reported 48,000 words against a real
+    8,000: sampled path data is thousands of `L` commands and every one matched
+    [A-Za-z]. A single figure here stands in for that, and the caption beside it
+    must survive -- it is prose, and it is what the speech pipeline reads.
+  */
+  it('drops a diagram but keeps its caption', () => {
+    const chapter = [
+      'Before the figure.',
+      '',
+      '<figure class="fig">',
+      '<svg class="fig-hue-1" viewBox="0 0 150 150" role="img" aria-label="A circle">',
+      '<path class="fig-curve" d="M12.00,75.00 L13.00,76.00 L14.00,77.00 L15.00,78.00"/>',
+      '<text class="fig-label" x="10" y="20">x</text>',
+      '</svg>',
+      '<figcaption>Four caption words here</figcaption>',
+      '</figure>',
+      '',
+      'After the figure.'
+    ].join('\n')
+
+    expect(countWords(chapter)).toBe(3 + 4 + 3)
+  })
+
+  /*
+    Inequalities are prose with angle brackets in them. Stripping tags before
+    the mathematics is removed matches from the `<` in one to the `>` in the
+    next and deletes the sentence between -- which is how the same chapter went
+    on to under-report by a quarter.
+  */
+  it('does not treat an inequality as an HTML tag', () => {
+    expect(countWords('If $a < b$ the loop appears, and when $r > 0$ it does not')).toBe(9)
+  })
+
   it('ignores mathematics, so dense algebra is not counted as long prose', () => {
     expect(countWords('The value $\\lambda=7$ works')).toBe(3)
     expect(countWords('text $$\n\\begin{bmatrix}1&6\\end{bmatrix}\n$$ more')).toBe(2)
