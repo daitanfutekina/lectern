@@ -24,6 +24,8 @@ type PdfDocument = {
   getPage: (n: number) => Promise<PdfPage>
   getOutline: () => Promise<OutlineEntry[] | null>
   getPageIndex: (ref: unknown) => Promise<number>
+  /** Resolves a named destination -- `dest` as a string rather than an array. */
+  getDestination: (name: string) => Promise<unknown[] | null>
 }
 interface OutlineEntry {
   title: string
@@ -129,10 +131,19 @@ async function outlineChapters(document: PdfDocument): Promise<Chapter[] | null>
   }
   if (!outline || outline.length < 2) return null
 
-  const starts: { title: string; page: number }[] = []
+  const starts: { title: string; page: number; sections: string[] }[] = []
   for (const entry of outline) {
     const page = await pageOf(document, entry.dest)
-    if (page !== null) starts.push({ title: entry.title.trim() || `Page ${page}`, page })
+    if (page === null) continue
+    starts.push({
+      title: cleanTitle(entry.title) || `Page ${page}`,
+      page,
+      // The level below is the chapter's sections. The chapter list stays flat
+      // -- SPEC section 3, a three-deep list is one nobody can scan -- but
+      // discarding the children entirely left every PDF in the library without
+      // a section list, however carefully the publisher had built one.
+      sections: (entry.items ?? []).map((item) => cleanTitle(item.title)).filter(Boolean)
+    })
   }
 
   starts.sort((a, b) => a.page - b.page)
@@ -145,15 +156,37 @@ async function outlineChapters(document: PdfDocument): Promise<Chapter[] | null>
       file: `p${from}-${Math.max(from, to)}`,
       title: start.title,
       crumb: null,
-      headings: [],
+      headings: start.sections,
       words: Math.max(1, (Math.max(from, to) - from + 1)) * 300
     }
   })
 }
 
+/**
+ * An outline title as it should read in a list.
+ *
+ * Real outlines carry hard line breaks where the printed heading wrapped --
+ * `6\rWeighted Graph Algorithms` -- and a bare carriage return renders as
+ * nothing at all, running the number into the word after it.
+ */
+function cleanTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * The page an outline entry points at.
+ *
+ * A destination is either an array whose first element is a page reference, or
+ * the *name* of one recorded in the document's name tree. Reading only the
+ * array form silently dropped every entry of the second kind, and a book that
+ * names its destinations -- LaTeX writes `chapter.1`, `part.2` -- lost its
+ * whole chapter list: The Algorithm Design Manual kept three of six entries and
+ * the survivors spanned pages 10 to 720, which is one chapter for the book.
+ */
 async function pageOf(document: PdfDocument, dest: unknown): Promise<number | null> {
   try {
-    const ref = Array.isArray(dest) ? dest[0] : null
+    const resolved = typeof dest === 'string' ? await document.getDestination(dest) : dest
+    const ref = Array.isArray(resolved) ? resolved[0] : null
     if (!ref) return null
     return (await document.getPageIndex(ref)) + 1
   } catch {

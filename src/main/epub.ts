@@ -1,7 +1,16 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { unzipSync, strFromU8 } from 'fflate'
-import { bodyOf, opfPath, parseOpf, resolveHref, titleFromDocument, type EpubStructure } from '@shared/epub'
+import {
+  bodyOf,
+  navigationOf,
+  opfPath,
+  parseOpf,
+  resolveHref,
+  titleFromDocument,
+  type EpubStructure,
+  type NavEntry
+} from '@shared/epub'
 import type { Chapter } from '@shared/library'
 
 /**
@@ -51,6 +60,20 @@ export async function openEpub(path: string): Promise<EpubBook> {
 
   const structure = parseOpf(strFromU8(entries[opf]), opf)
 
+  /*
+    The book's own table of contents, in preference to anything scraped.
+
+    A publisher's chapter opens `<h2>5</h2>` with the title in a styled
+    paragraph underneath, so the first heading -- which is what this used to
+    fall back on -- named every chapter after its number. The navigation
+    document says "5. Deployability", and it is the only place that does.
+  */
+  const nav = navigationOf(structure, (href) => {
+    const raw = entries[href]
+    return raw ? strFromU8(raw) : null
+  })
+  const labels = navLabels(nav)
+
   const chapters: Chapter[] = structure.spine.map((item) => {
     const raw = entries[item.href]
     const xhtml = raw ? strFromU8(raw) : ''
@@ -60,9 +83,11 @@ export async function openEpub(path: string): Promise<EpubBook> {
 
     return {
       file: item.href,
-      title: titleFromDocument(xhtml, basename(item.href).replace(/\.[^.]+$/, '')),
+      title:
+        labels.get(item.href) ??
+        titleFromDocument(xhtml, basename(item.href).replace(/\.[^.]+$/, '')),
       crumb: structure.title,
-      headings: headingsOf(xhtml),
+      headings: sectionsOf(nav, item.href, xhtml),
       words
     }
   })
@@ -70,6 +95,45 @@ export async function openEpub(path: string): Promise<EpubBook> {
   const book: EpubBook = { structure, chapters, entries }
   opened.set(path, book)
   return book
+}
+
+/**
+ * The title each spine document goes by, from the navigation.
+ *
+ * A chapter and every section inside it point at the same file, so the
+ * shallowest entry wins: that is the one naming the document rather than a
+ * place within it.
+ */
+function navLabels(nav: readonly NavEntry[]): Map<string, string> {
+  const labels = new Map<string, string>()
+  const depths = new Map<string, number>()
+
+  for (const entry of nav) {
+    const seen = depths.get(entry.href)
+    if (seen !== undefined && seen <= entry.depth) continue
+    depths.set(entry.href, entry.depth)
+    labels.set(entry.href, entry.label)
+  }
+  return labels
+}
+
+/**
+ * The sections within one document.
+ *
+ * From the navigation where it has them, because a book's own contents knows
+ * which headings are sections and which are the chapter's own title. Scraping
+ * is the fallback, and it takes h2 *and* h3: a publisher who titles a chapter
+ * with h2 numbers its sections h3, and reading only h2 found one "section"
+ * per chapter, named after the chapter number.
+ */
+function sectionsOf(nav: readonly NavEntry[], href: string, xhtml: string): string[] {
+  const mine = nav.filter((entry) => entry.href === href)
+  if (mine.length > 1) {
+    const top = Math.min(...mine.map((entry) => entry.depth))
+    const deeper = mine.filter((entry) => entry.depth > top).map((entry) => entry.label)
+    if (deeper.length > 0) return deeper
+  }
+  return headingsOf(xhtml)
 }
 
 function headingsOf(xhtml: string): string[] {

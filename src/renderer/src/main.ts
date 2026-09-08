@@ -36,6 +36,7 @@ import { hasCover, renderHome, setCover } from './home'
 import { type ShelfSort } from '@shared/shelf'
 import { pdfCover, renderBook, type PdfView } from './pdf-view'
 import { renderEpub } from './epub-view'
+import { resolveHref, splitHref } from '@shared/epub'
 import type { PrepareProgress } from '@shared/speech-cache'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
 import { mathUtterance } from '@shared/math-gate'
@@ -407,11 +408,35 @@ function sectionAt(headings: readonly HTMLElement[]): number {
   return at
 }
 
+/**
+ * The headings that are this chapter's sections.
+ *
+ * The shallowest level that occurs more than once, rather than `h2` always. A
+ * publisher who titles a chapter `<h2>5</h2>` numbers its sections `<h3>`, so
+ * reading h2 alone offered one "section" per chapter, named after the chapter
+ * number. Our own books are unaffected: their sections are h2 and there are
+ * many of them, so the first level tried is still the one used.
+ */
+function sectionHeadings(body: HTMLElement): HTMLElement[] {
+  const h2 = [...body.querySelectorAll<HTMLElement>('h2')]
+  if (h2.length > 1) return h2
+
+  const h3 = [...body.querySelectorAll<HTMLElement>('h3')]
+  if (h3.length > 1) return h3
+
+  return h2
+}
+
 function appendSections(into: HTMLElement): void {
-  const body = chapterBody()
+  /*
+    An EPUB renders into a frame and never creates `.chapter-body`, so keying
+    this to that class alone meant a downloaded book showed no section list at
+    all -- not a short one, none.
+  */
+  const body = chapterBody() ?? epubBody
   if (!body) return
 
-  const found = [...body.querySelectorAll<HTMLElement>('h2')]
+  const found = sectionHeadings(body)
   if (found.length === 0) return
 
   const toggle = element('button', 'section-toggle')
@@ -820,7 +845,9 @@ async function openEpubChapter(
   container.replaceChildren(host)
   container.scrollTop = 0
 
-  const rendered = await renderEpub(host, html)
+  const rendered = await renderEpub(host, html, (href) =>
+    followEpubLink(book, chapter, href)
+  )
   if (!rendered) {
     console.warn('epub: frame did not render')
     return
@@ -828,8 +855,18 @@ async function openEpubChapter(
 
   epubBody = rendered.body
 
+  /*
+    A link's destination outranks the stored position.
+
+    Following a cross-reference and landing where you last stopped reading is
+    the one thing a link must not do.
+  */
+  const jump = epubFragment
+  epubFragment = null
+
   const stored = at ?? bookProgress(book.id).chapters[chapter.file]?.position ?? START
-  restorePosition(container, rendered.body, stored)
+  if (jump) scrollToFragment(jump)
+  else restorePosition(container, rendered.body, stored)
 
   /*
     And again once the book has finished arriving.
@@ -848,7 +885,10 @@ async function openEpubChapter(
   const placed = container.scrollTop
   setTimeout(() => {
     if (Math.abs(container.scrollTop - placed) > 2) return
-    restorePosition(container, rendered.body, stored)
+    // A link jump is settled by the same content landing, so re-running it is
+    // the right correction there too.
+    if (jump) scrollToFragment(jump)
+    else restorePosition(container, rendered.body, stored)
   }, 1400)
 
   // The frame is same-origin, so the speech walk reaches straight into it and
@@ -860,6 +900,58 @@ async function openEpubChapter(
   reader.load(utterances, nearest ? reader.indexNear(nearest as HTMLElement) : 0)
   startPreparing()
   renderFlags()
+}
+
+/**
+ * A link clicked inside an EPUB.
+ *
+ * Three kinds, and the book does not distinguish them: a jump within this
+ * document, a jump to another document in the same book, and a link out to the
+ * web. The first two are the book's own contents page and its cross-references,
+ * which are the whole reason a reader opens a table of contents at all.
+ */
+function followEpubLink(book: Book, chapter: Chapter, href: string): void {
+  if (/^(https?|mailto):/i.test(href)) {
+    // Denied by the window-open handler in main, which opens it in the real
+    // browser instead. Nothing navigates the reader away from the book.
+    window.open(href, '_blank')
+    return
+  }
+
+  const { path, fragment } = splitHref(href)
+
+  // A bare `#id` names a place in the document already open.
+  if (!path) {
+    if (fragment) scrollToFragment(fragment)
+    return
+  }
+
+  // Hrefs inside a book are relative to the document holding them.
+  const target = resolveHref(chapter.file, path)
+  const found = book.chapters.find((entry) => entry.file === target)
+  if (!found) return
+
+  if (found.file === chapter.file) {
+    if (fragment) scrollToFragment(fragment)
+    return
+  }
+
+  epubFragment = fragment
+  void open(book.id, found.file)
+}
+
+/**
+ * Where to land after the next EPUB chapter renders.
+ *
+ * A link carries its fragment across a chapter change, but the document it
+ * names does not exist until the frame has parsed it, so the target is held
+ * here rather than resolved at click time.
+ */
+let epubFragment: string | null = null
+
+function scrollToFragment(fragment: string): void {
+  const found = epubBody?.ownerDocument.getElementById(fragment)
+  found?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 /* ── Flagging a passage ──────────────────────────────────────────────── */

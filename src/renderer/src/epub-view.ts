@@ -47,7 +47,11 @@ const HOST_SHEET = `
  *
  * Resolves once the document has parsed, so the caller can walk it for speech.
  */
-export function renderEpub(container: HTMLElement, html: string): Promise<EpubFrame | null> {
+export function renderEpub(
+  container: HTMLElement,
+  html: string,
+  onLink?: (href: string) => void
+): Promise<EpubFrame | null> {
   return new Promise((resolve) => {
     container.replaceChildren()
 
@@ -85,6 +89,29 @@ export function renderEpub(container: HTMLElement, html: string): Promise<EpubFr
       // precedence over these where they disagree.
       style.textContent = HOST_SHEET
       doc.head?.append(style)
+
+      /*
+        Every link in the book, handed back to the caller.
+
+        The document is rendered from `srcdoc`, so it has no URL of its own and
+        a relative `href` resolves against the application instead of against
+        the archive. Clicking an entry in a book's own contents therefore aimed
+        at a page that does not exist: the frame went blank, and the chapter it
+        named was unreachable. Only the caller knows the spine, so resolving
+        happens there and this just reports the href.
+      */
+      if (onLink) {
+        doc.addEventListener('click', (event) => {
+          // Duck-typed, not `instanceof`: the frame is its own realm, so the
+          // parent's `Element` does not match anything inside it.
+          const target = event.target as { closest?: (selector: string) => Element | null } | null
+          const anchor = target?.closest?.('a[href]')
+          const href = anchor?.getAttribute('href')
+          if (!href) return
+          event.preventDefault()
+          onLink(href)
+        })
+      }
 
       fitToContent(frame, doc.body)
       resolve({ frame, body: doc.body })
