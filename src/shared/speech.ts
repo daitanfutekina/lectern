@@ -7,7 +7,7 @@
  */
 
 /** Why a block is not spoken. Recorded rather than dropped, so a gap is explicable. */
-export type SkipReason = 'code' | 'empty' | 'navigation' | 'math-too-complex' | 'table'
+export type SkipReason = 'code' | 'empty' | 'navigation' | 'math-too-complex' | 'table' | 'graphic'
 
 export type Block =
   | { readonly kind: 'heading'; readonly level: number; readonly text: string }

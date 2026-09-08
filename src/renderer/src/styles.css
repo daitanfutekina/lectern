@@ -554,6 +554,118 @@ details.box[open] > summary::before {
   border-left-color: var(--danger);
 }
 
+/* ── Figures ───────────────────────────────────────────────────────────
+   A book carries a diagram's geometry and nothing else. Every colour, weight
+   and type size is set here, once, so that a figure cannot drift away from the
+   application the way the old per-file stylesheets did (SPEC section 3). A
+   chapter writes <svg> with these classes and no attributes of its own. */
+
+figure.fig {
+  margin: 1.6em 0;
+  text-align: center;
+}
+
+figure.fig svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+figure.fig figcaption {
+  margin-top: 0.6em;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+/* A row of small curve thumbnails: the polar field guide, the limaçon cases. */
+.fig-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.4em 1em;
+  margin: 1.6em 0;
+}
+
+.fig-grid figure.fig {
+  margin: 0;
+}
+
+.fig-grid figure.fig figcaption {
+  font-size: 0.82em;
+}
+
+/* Semantic parts of a diagram. Geometry in the book, appearance here. */
+.fig-axis {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.fig-grid-line {
+  fill: none;
+  stroke: var(--border-soft);
+  stroke-width: 0.75;
+}
+
+.fig-curve {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fig-curve-alt {
+  fill: none;
+  stroke: var(--violet);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fig-guide {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.fig-fill {
+  fill: var(--accent);
+  fill-opacity: 0.18;
+  stroke: none;
+}
+
+.fig-fill-alt {
+  fill: var(--violet);
+  fill-opacity: 0.18;
+  stroke: none;
+}
+
+.fig-point {
+  fill: var(--accent);
+  stroke: none;
+}
+
+.fig-arrow {
+  fill: var(--accent);
+  stroke: none;
+}
+
+.fig-label {
+  fill: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 9px;
+}
+
+.fig-label-em {
+  fill: var(--text);
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+
 /* ── Mathematics ───────────────────────────────────────────────────── */
 
 .math-display {

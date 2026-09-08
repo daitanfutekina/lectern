@@ -33,7 +33,12 @@ const SKIPPED: ReadonlyArray<readonly [string, SkipReason]> = [
   ['TABLE', 'table'],
   ['NAV', 'navigation'],
   ['ASIDE', 'navigation'],
-  ['BUTTON', 'navigation']
+  ['BUTTON', 'navigation'],
+  // A diagram's <text> nodes are axis ticks and one-symbol labels -- "2", "-2",
+  // "x", "theta". Read aloud they are noise between two sentences that belong
+  // together, and `textContent` would splice them straight into the paragraph.
+  // The <figcaption> beside it carries the part a listener can use.
+  ['svg', 'graphic']
 ]
 
 /**
@@ -42,7 +47,12 @@ const SKIPPED: ReadonlyArray<readonly [string, SkipReason]> = [
  * of it a listener can use.
  */
 function skipReasonFor(element: HTMLElement): SkipReason | null {
-  for (const [tag, reason] of SKIPPED) if (element.tagName === tag) return reason
+  // Uppercased on both sides: HTML elements report an uppercase `tagName`, but
+  // an <svg> parsed from a chapter is in the SVG namespace and reports the
+  // lowercase qualified name instead. Comparing raw would silently miss it, and
+  // the miss is invisible -- the diagram would simply start being read aloud.
+  const tagName = element.tagName.toUpperCase()
+  for (const [tag, reason] of SKIPPED) if (tagName === tag.toUpperCase()) return reason
   // An adapter can mark something it produced as furniture. PDF page markers
   // use this: they are a landmark for someone following on paper, and reading
   // "Page 47" aloud every page is exactly the defect the pipeline exists to
