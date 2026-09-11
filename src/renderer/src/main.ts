@@ -1622,10 +1622,27 @@ async function showSettings(): Promise<void> {
 }
 
 /** Push settings into the parts of the application that read them. */
+/**
+ * The collapse button's own state: which way it points, and what it says.
+ *
+ * Shared by the click and by the restore at startup, because a sidebar that
+ * comes back hidden with a button still offering to hide it is worse than one
+ * that forgot.
+ */
+function showCollapsed(hidden: boolean): void {
+  const button = el<HTMLButtonElement>('collapse')
+  if (!button) return
+  button.textContent = hidden ? '›' : '‹'
+  button.title = hidden ? 'Show the sidebar' : 'Hide the sidebar'
+}
+
 function applySettings(): void {
   const root = document.documentElement
   root.style.setProperty('--font-size-scale', String(settings.fontScale))
   root.style.setProperty('--measure', `${settings.measure}ch`)
+
+  document.body.classList.toggle('is-collapsed', settings.collapsed)
+  showCollapsed(settings.collapsed)
 
   reader.setRate(settings.rate)
   reader.setShape(settings.shape)
@@ -1768,8 +1785,12 @@ async function start(): Promise<void> {
   const collapse = el<HTMLButtonElement>('collapse')
   collapse?.addEventListener('click', () => {
     const hidden = document.body.classList.toggle('is-collapsed')
-    collapse.textContent = hidden ? '›' : '‹'
-    collapse.title = hidden ? 'Show the sidebar' : 'Hide the sidebar'
+    showCollapsed(hidden)
+    // Not through `changeSettings`: that re-applies the voice and restarts
+    // speech preparation, and hiding a sidebar needs neither.
+    void window.lectern.settings.set({ collapsed: hidden }).then((updated) => {
+      settings = updated
+    })
     // The PDF is fitted to the pane, so the pane changing width means the page
     // has to be laid out again.
     if (pdfView) void pdfView.setZoom(pdfView.zoom())
@@ -1807,21 +1828,36 @@ async function start(): Promise<void> {
     }
   })
 
-  // Clicking a paragraph starts reading from it, which is the fastest way to
-  // say "read from here" and needs no extra control.
   /*
-    Click a paragraph to read from it.
-    
-    This was a double-click, which nothing on screen suggested and nobody found.
-    A single click on text does nothing else in a reader, so it is free to mean
-    the one thing a reader wants from a paragraph they are looking at.
+    Double-click a paragraph to read from it.
+
+    It was a double-click once, became a single click because nothing on screen
+    suggested the gesture and nobody found it, and is a double-click again --
+    this time on evidence rather than on reasoning. On a touchpad a single click
+    is trivially easy to produce by accident, and the failure is loud: the room
+    starts being read aloud at whatever paragraph the palm landed on. A gesture
+    nobody discovers costs a feature; a gesture that fires by itself costs the
+    reader's attention every time.
+
+    `dblclick` also selects the word underneath, which is the browser's default
+    and not wanted here -- so the selection is cleared. Dragging to select is
+    untouched, which is how a reader selects text anyway.
   */
-  el<HTMLElement>('content')?.addEventListener('click', (event) => {
+  el<HTMLElement>('content')?.addEventListener('dblclick', (event) => {
     const target = event.target
     if (!(target instanceof HTMLElement)) return
     // Controls and links keep their own behaviour.
     if (target.closest('button, a, summary, input, select')) return
-    if ((window.getSelection()?.toString() ?? '').length > 0) return
+
+    /*
+      The selection is cleared rather than consulted.
+
+      Under a single click, text already selected meant "the reader is working
+      with this passage, not asking for it" and the handler stood down. A
+      double-click makes its own selection by definition, so the same guard
+      would have refused every one of them.
+    */
+    window.getSelection()?.removeAllRanges()
 
     /*
       Where the reader actually pointed, not merely which block they hit.

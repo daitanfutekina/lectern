@@ -18,6 +18,7 @@ import {
   speak as speakPiper
 } from './piper'
 import { configureSettings, loadSettings, saveSettings } from './settings'
+import { DEFAULT_BOUNDS, loadWindowBounds, rememberWindow, type WindowBounds } from './window-state'
 import { cancelPrepare, prepareChapter } from './prepare'
 import {
   clearSpeechStore,
@@ -122,13 +123,14 @@ function conversion(indexRate: unknown, protect: unknown): { indexRate: number; 
   }
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
   const window = new BrowserWindow({
     // Width is overridable so a resize can be verified end to end: the point
     // of anchoring to blocks is that reopening narrower lands on the same
     // paragraph, not the same pixel.
-    width: Number(process.env['LECTERN_WIDTH']) || 1100,
-    height: 820,
+    width: Number(process.env['LECTERN_WIDTH']) || bounds.width,
+    height: bounds.height,
+    ...(bounds.x !== null && bounds.y !== null ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 640,
     minHeight: 480,
     show: false,
@@ -156,7 +158,17 @@ function createWindow(): BrowserWindow {
   // talking over whoever is using the machine.
   const verifying = Boolean(process.env['LECTERN_CAPTURE'])
   if (verifying) window.webContents.setAudioMuted(true)
-  else window.once('ready-to-show', () => window.show())
+  else
+    window.once('ready-to-show', () => {
+      // Maximized before shown, so the window does not appear at its restored
+      // size and then jump.
+      if (bounds.maximized) window.maximize()
+      window.show()
+    })
+
+  // A verification run must not teach the application where a hidden window
+  // sat, or the next real launch opens wherever the capture happened to be.
+  if (!verifying) rememberWindow(window)
 
   /*
     The window itself never zooms.
@@ -224,7 +236,7 @@ function createWindow(): BrowserWindow {
   return window
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setAppUserModelId('com.lectern.app')
   configureOcrCache(root())
   configureFlags(root())
@@ -553,7 +565,7 @@ app.whenReady().then(() => {
     return removeBookmark(bookId, id)
   })
 
-  const window = createWindow()
+  const window = createWindow(await loadWindowBounds())
 
   // Editing a chapter in Claude Code and seeing it in the reader is the loop
   // M7 exists to close, so the reader is told rather than having to be told.

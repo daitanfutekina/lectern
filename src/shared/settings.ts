@@ -66,6 +66,8 @@ export interface Settings {
 
   /** Whether the sidebar lists the open chapter's sections. */
   readonly sections: boolean
+  /** Whether the sidebar is hidden altogether, for reading without it. */
+  readonly collapsed: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -87,7 +89,8 @@ export const DEFAULT_SETTINGS: Settings = {
   ocrDpi: 300,
   ocrAuto: true,
   sort: 'added',
-  sections: true
+  sections: true,
+  collapsed: false
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -154,7 +157,8 @@ export function parseSettings(source: string): Settings {
     ocrDpi: num(raw['ocrDpi'], 300, 150, 450),
     ocrAuto: bool(raw['ocrAuto'], true),
     sort: isShelfSort(raw['sort']) ? raw['sort'] : 'added',
-    sections: bool(raw['sections'], true)
+    sections: bool(raw['sections'], true),
+    collapsed: bool(raw['collapsed'], false)
   }
 }
 
