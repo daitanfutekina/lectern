@@ -13,12 +13,24 @@
       WebAssembly. Both widen the policy, and the trade is worth naming: the
       blob is assembled by a script that came from `'self'`, the WebAssembly is
       a file in this bundle, and no outside origin can reach the page to plant
-      either. Nothing here relaxes `default-src`, so the page still cannot talk
-      to the network at all.
+      either. Nothing here relaxes `default-src`, so the page still cannot
+      fetch, load a script, or take a stylesheet from the network.
+
+      `book:` is a chapter's own figures and media, served out of its book
+      folder by the main process and nothing else.
+
+      `frame-src https:` is the one remote origin, and it is deliberate:
+      invariant 2's exception for embedded media. A frame is a document of its
+      own, so it cannot restyle a chapter or reach the page; every frame a
+      chapter embeds is sandboxed on the way in (see `@shared/assets`); and an
+      embed that cannot load fails inside its frame while the chapter around it
+      reads on. `'self'` is restated because declaring `frame-src` at all stops
+      it inheriting from `default-src` -- leaving it out would have broken
+      every local embed while enabling the remote ones.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' blob: data:"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' book: https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: book:; media-src 'self' blob: book:; font-src 'self'; connect-src 'self' blob: data:"
     />
     <title>Lectern</title>
   </head>

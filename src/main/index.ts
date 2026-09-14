@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
-import { join } from 'node:path'
+import { join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
 import { configureMath, speakMath } from './math-speech'
@@ -46,6 +46,7 @@ import {
   removeBookmark
 } from './progress'
 import { findBook } from '@shared/library'
+import { ASSET_SCHEME, parseAssetUrl } from '@shared/assets'
 import { bookmarkId } from '@shared/progress'
 import type { LibraryIndex } from '@shared/library'
 import type { ReadingPosition } from '@shared/progress'
@@ -66,6 +67,16 @@ const SCHEME = 'app'
 protocol.registerSchemesAsPrivileged([
   {
     scheme: SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  },
+  /*
+    Files a chapter refers to. A scheme of its own rather than a path under
+    `app://`, because in development the page is served by the Vite server and
+    `app://` is not its origin -- a figure that worked only in the packaged build
+    would be verified by nobody. `stream` is what lets a video seek.
+  */
+  {
+    scheme: ASSET_SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
   }
 ])
@@ -251,6 +262,7 @@ app.whenReady().then(async () => {
   configureSettings(root())
   configureSpeechStore(root())
   serveRenderer()
+  serveBookAssets()
 
   ipcMain.handle('library:get', () => library())
   ipcMain.handle('library:rescan', () => library(true))
@@ -849,6 +861,24 @@ LIVE-RELOAD-MARKER
     mathBlocks: document.querySelectorAll('[data-latex]').length,
     speechSpans: document.querySelectorAll('.math-speech').length,
 
+    // Figures as a reader meets them: whether each caption's mathematics was
+    // typeset or is still showing its dollar signs, whether each image actually
+    // loaded, and what sandbox every embedded frame was given.
+    captions: document.querySelectorAll('.chapter-body figcaption').length,
+    captionsTypeset: [...document.querySelectorAll('.chapter-body figcaption')]
+      .filter((c) => c.querySelector('mjx-container')).length,
+    captionsShowingDollars: [...document.querySelectorAll('.chapter-body figcaption')]
+      .filter((c) => (c.innerText || '').includes('$')).length,
+    images: [...document.querySelectorAll('.chapter-body img')].map((i) => ({
+      src: i.getAttribute('src'),
+      loaded: i.complete && i.naturalWidth > 0
+    })),
+    frames: [...document.querySelectorAll('.chapter-body iframe')].map((f) => ({
+      src: f.getAttribute('src'),
+      sandbox: f.getAttribute('sandbox')
+    })),
+    sectionLinks: [...document.querySelectorAll('.section-link')].map((s) => s.textContent).slice(0, 6),
+
     inlineMathParagraph: (() => {
       const p = [...document.querySelectorAll('.chapter-body p')]
         .find((el) => el.querySelector('.math-inline'));
@@ -901,6 +931,45 @@ function serveRenderer(): void {
 
     if (!target.startsWith(bundle)) return new Response('Forbidden', { status: 403 })
     return net.fetch(pathToFileURL(target).toString())
+  })
+}
+
+/**
+ * Serve a book's own figures, media and embedded widgets out of its folder.
+ *
+ * Only our books -- a PDF or EPUB is a single file with nothing beside it to
+ * serve -- and only from inside the book's folder. The URL rules in
+ * `@shared/assets` already refuse traversal, encoded or not; the resolved path
+ * is checked again here against the folder on disk, because a guard made of
+ * string rules alone is one missed case away from reading the rest of the disk.
+ */
+function serveBookAssets(): void {
+  protocol.handle(ASSET_SCHEME, async (request) => {
+    const asset = parseAssetUrl(request.url)
+    if (!asset) return new Response('Not found', { status: 404 })
+
+    const book = findBook(await library(), asset.bookId)
+    if (!book || (book.format !== 'markdown' && book.format !== 'html')) {
+      return new Response('Not found', { status: 404 })
+    }
+
+    const folder = resolvePath(book.path)
+    const target = resolvePath(folder, ...asset.segments)
+    // With the separator: a bare prefix test lets `books/calc` match
+    // `books/calc-old`, which is a different book.
+    if (!target.startsWith(folder + pathSep)) return new Response('Forbidden', { status: 403 })
+
+    try {
+      const response = await net.fetch(pathToFileURL(target).toString())
+      if (!response.ok) return new Response('Not found', { status: 404 })
+      // The type comes from the allowlist, not from guessing at the file, so a
+      // file cannot be served as something its extension did not declare.
+      const headers = new Headers(response.headers)
+      headers.set('Content-Type', asset.type)
+      return new Response(response.body, { status: response.status, headers })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
   })
 }
 

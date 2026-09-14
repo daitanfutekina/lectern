@@ -78,3 +78,47 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('```ts\nconst x = 1\n```')).toContain('<code')
   })
 })
+
+/*
+  A figure is raw HTML, so its caption never passes through remark-math. Every
+  one of the library's 43 captions arrived in the page with its dollar signs
+  and LaTeX source intact, untypeset and unspeakable. These are shaped after
+  the real ones in calculus-3 chapter 1.
+*/
+describe('renderMarkdown, figure captions', () => {
+  const figure = (caption: string): string =>
+    renderMarkdown(`<figure class="fig">\n<svg></svg>\n<figcaption>${caption}</figcaption>\n</figure>`)
+
+  it('gives caption mathematics the wrapper a paragraph gets', () => {
+    const html = figure('Example 1.5. $x = 3t$, $y = t^{2}$ gives the whole parabola.')
+    expect(html).toContain('<span class="math-inline" data-latex="x = 3t">\\(x = 3t\\)</span>')
+    expect(html).toContain('data-latex="y = t^{2}"')
+    expect(html).not.toContain('$')
+    expect(html).toContain('Example 1.5.')
+    expect(html).toContain('gives the whole parabola.')
+  })
+
+  it('keeps backslash commands intact', () => {
+    const html = figure('The cardioid $r = 1+\\cos\\theta$: area $3\\pi/2$.')
+    expect(html).toContain('data-latex="r = 1+\\cos\\theta"')
+    expect(html).toContain('data-latex="3\\pi/2"')
+  })
+
+  it('leaves money alone', () => {
+    // Pandoc's rule: a closing dollar followed by a digit is not a closing
+    // dollar, which is what keeps a price from being typeset.
+    const html = figure('Tickets cost $5 and $10 at the door.')
+    expect(html).not.toContain('math-inline')
+    expect(html).toContain('$5 and $10')
+  })
+
+  it('reaches into markup inside the caption', () => {
+    expect(figure('<em>Area</em> is $\\pi r^2$.')).toContain('data-latex="\\pi r^2"')
+  })
+
+  it('does not touch raw HTML that is not a caption', () => {
+    // Outside a caption a dollar sign is as likely to be money as mathematics.
+    const html = renderMarkdown('<div class="note">Costs $x$ dollars</div>')
+    expect(html).not.toContain('math-inline')
+  })
+})

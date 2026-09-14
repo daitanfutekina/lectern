@@ -36,6 +36,7 @@ import { hasCover, renderHome, setCover } from './home'
 import { type ShelfSort } from '@shared/shelf'
 import { pdfCover, renderBook, type PdfView } from './pdf-view'
 import { renderEpub } from './epub-view'
+import { chapterFragment } from './chapter-assets'
 import { resolveHref, splitHref } from '@shared/epub'
 import type { PrepareProgress } from '@shared/speech-cache'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
@@ -700,7 +701,7 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   const rendered = element('div', 'chapter-body')
   // The only place markup is assigned from a string. The source is the user's
   // own library on their own disk, and the pipeline that produced it is ours.
-  rendered.innerHTML = isMarkdown ? renderMarkdown(body) : body
+  rendered.append(chapterFragment(isMarkdown ? renderMarkdown(body) : body, book.id, file))
   article.append(rendered)
 
   container.replaceChildren(article)
@@ -1950,7 +1951,7 @@ async function start(): Promise<void> {
       return
     }
 
-    const block = target.closest('p, h1, h2, h3, h4, h5, h6, li, .pdf-text-layer')
+    const block = target.closest('p, h1, h2, h3, h4, h5, h6, li, figcaption, .pdf-text-layer')
     if (!(block instanceof HTMLElement)) return
     if (block.dataset['speak'] === 'no') return
 

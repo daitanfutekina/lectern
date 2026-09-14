@@ -115,6 +115,77 @@ function mathAsText() {
   }
 }
 
+/**
+ * One run of `$...$` inside a caption, by Pandoc's rule for inline maths: the
+ * opening dollar is not followed by a space, the closing one is not preceded by
+ * one and not followed by a digit. That is what keeps "$5 and $10" prose.
+ */
+const CAPTION_MATH = /(?<!\\)\$(?!\s)((?:[^$\\]|\\.)+?)(?<!\s)\$(?!\d)/g
+
+type HastNode = {
+  type: string
+  tagName?: string
+  value?: string
+  properties?: Record<string, unknown>
+  children?: HastNode[]
+}
+
+/**
+ * Mathematics inside a figure's caption, given the treatment a paragraph's gets.
+ *
+ * A figure is raw HTML in the chapter, and raw HTML is not Markdown: nothing
+ * inside it passes through `remark-math`. So `$r = 1+\cos\theta$` in a
+ * `<figcaption>` arrived in the page as those literal characters -- and MathJax
+ * is configured for `\(...\)` only, so it was never typeset either. The caption
+ * showed its LaTeX source, and a listener got nothing from it at all.
+ *
+ * Converted to the same `.math-inline` wrapper with the source on `data-latex`,
+ * a caption's equation renders like any other and reaches the speech path the
+ * same way. Scoped to captions deliberately: elsewhere in raw HTML a dollar sign
+ * is as likely to be money, and the LSAT book is full of money.
+ */
+function captionMath() {
+  const convert = (node: HastNode): void => {
+    if (!node.children) return
+    const next: HastNode[] = []
+    for (const child of node.children) {
+      if (child.type === 'element') {
+        // Code in a caption is shown, not typeset.
+        if (child.tagName !== 'code') convert(child)
+        next.push(child)
+        continue
+      }
+      if (child.type !== 'text' || !child.value?.includes('$')) {
+        next.push(child)
+        continue
+      }
+
+      const text = child.value
+      let last = 0
+      for (const match of text.matchAll(CAPTION_MATH)) {
+        const at = match.index ?? 0
+        const latex = match[1] ?? ''
+        if (at > last) next.push({ type: 'text', value: text.slice(last, at) })
+        next.push({
+          type: 'element',
+          tagName: 'span',
+          properties: { className: ['math-inline'], dataLatex: latex },
+          children: [{ type: 'text', value: `\\(${latex}\\)` }]
+        })
+        last = at + match[0].length
+      }
+      if (last < text.length) next.push({ type: 'text', value: text.slice(last) })
+    }
+    node.children = next
+  }
+
+  return (tree: unknown): void => {
+    visit(tree as never, 'element', (node: HastNode) => {
+      if (node.tagName === 'figcaption') convert(node)
+    })
+  }
+}
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkFrontmatter, ['yaml'])
@@ -128,6 +199,9 @@ const processor = unified()
   // by them or for them, and never fetched from a network.
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeRaw)
+  // After `rehypeRaw`, which is what turns a figure's raw HTML into elements
+  // there is a caption to find in.
+  .use(captionMath)
   .use(rehypeStringify, { allowDangerousHtml: true })
 
 export function renderMarkdown(source: string): string {

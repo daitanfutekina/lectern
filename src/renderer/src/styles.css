@@ -582,6 +582,23 @@ figure.fig svg {
   overflow: visible;
 }
 
+/*
+  An embedded page. A frame's own background is transparent, so a widget that
+  does not paint one drew the browser's default black text straight onto the
+  reader's dark page -- present, and unreadable. A remote page paints its own
+  and covers this; a local one gets the paper a standalone page would have had.
+*/
+.chapter-body iframe {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 320px;
+  margin: 1.2em auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: #fff;
+}
+
 figure.fig figcaption {
   margin-top: 0.85em;
   padding-top: 0.7em;

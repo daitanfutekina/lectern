@@ -38,7 +38,18 @@ const SKIPPED: ReadonlyArray<readonly [string, SkipReason]> = [
   // "x", "theta". Read aloud they are noise between two sentences that belong
   // together, and `textContent` would splice them straight into the paragraph.
   // The <figcaption> beside it carries the part a listener can use.
-  ['svg', 'graphic']
+  ['svg', 'graphic'],
+  /*
+    Embedded media. A frame's document is its own and has no children here, so
+    an <iframe> was silent already -- but <video>, <audio> and <object> hold
+    *fallback* markup, "your browser cannot play this" paragraphs that are real
+    elements, and walking into them read that apology aloud mid-chapter.
+    Invariant 4: the caption is the speakable part of an embed, never the embed.
+  */
+  ['IFRAME', 'graphic'],
+  ['VIDEO', 'graphic'],
+  ['AUDIO', 'graphic'],
+  ['OBJECT', 'graphic']
 ]
 
 /**
@@ -66,7 +77,27 @@ function skipReasonFor(element: HTMLElement): SkipReason | null {
  * descended into rather than read as one lump -- otherwise a theorem and its
  * three paragraphs become a single utterance minutes long.
  */
-const LEAF_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'SUMMARY', 'DD', 'DT'])
+/*
+  FIGCAPTION is a leaf because its text sits in it directly. It was absent, so
+  the walk descended into a caption looking for paragraphs, found bare text, and
+  spoke nothing -- every one of the library's 43 captions was silent while the
+  authoring guide promised a listener that the caption is the part they get.
+*/
+const LEAF_TAGS = new Set([
+  'P',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'LI',
+  'BLOCKQUOTE',
+  'SUMMARY',
+  'DD',
+  'DT',
+  'FIGCAPTION'
+])
 
 const HEADING_LEVEL: Readonly<Record<string, number>> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 }
 
