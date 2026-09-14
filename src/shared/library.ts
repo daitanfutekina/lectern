@@ -62,6 +62,12 @@ export interface Book {
    * unregistered macro is unspeakable as well as unrenderable.
    */
   readonly macros: Readonly<Record<string, string>>
+  /**
+   * A PDF whose pages are images. Its text exists only as recognition output,
+   * and invariant 5 keeps that for speech alone -- so a scan cannot be searched,
+   * and has to be able to say so rather than appear to contain nothing.
+   */
+  readonly scanned?: boolean
 }
 
 export interface LibraryIndex {

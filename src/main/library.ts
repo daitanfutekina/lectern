@@ -141,7 +141,8 @@ async function readFileBook(dir: string, name: string, format: DocumentFormat): 
     // A textbook that declares parts is grouped by them, the same as one of
     // ours that declares them in its manifest.
     parts: book.parts,
-    macros: {}
+    macros: {},
+    scanned: !book.digital
   }
 }
 

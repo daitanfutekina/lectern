@@ -120,7 +120,7 @@ function mathAsText() {
  * opening dollar is not followed by a space, the closing one is not preceded by
  * one and not followed by a digit. That is what keeps "$5 and $10" prose.
  */
-const CAPTION_MATH = /(?<!\\)\$(?!\s)((?:[^$\\]|\\.)+?)(?<!\s)\$(?!\d)/g
+export const CAPTION_MATH = /(?<!\\)\$(?!\s)((?:[^$\\]|\\.)+?)(?<!\s)\$(?!\d)/g
 
 type HastNode = {
   type: string

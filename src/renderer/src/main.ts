@@ -34,7 +34,9 @@ import { BOOK_VOICE, clampShape, type VoiceShape } from '@shared/voice'
 import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-queue'
 import { hasCover, renderHome, setCover } from './home'
 import { type ShelfSort } from '@shared/shelf'
-import { pdfCover, renderBook, type PdfView } from './pdf-view'
+import { pageText, pdfCover, renderBook, type PdfView } from './pdf-view'
+import { clearResult, locate, showResult } from './find-view'
+import { PER_CHAPTER, findMatches, htmlPlain, markdownPlain, queryPattern, type Match } from '@shared/find'
 import { renderEpub } from './epub-view'
 import { chapterFragment } from './chapter-assets'
 import { resolveHref, splitHref } from '@shared/epub'
@@ -657,6 +659,12 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   if (!book || !chapter) return
 
   restoring = true
+  // Results listed for one book mean nothing in another.
+  if (findBookId !== null && findBookId !== bookId) {
+    closeFind()
+    resetFind()
+    findBookId = null
+  }
   // The previous chapter's frame is about to be replaced, and a stale body
   // would have position tracking measuring a document that is no longer shown.
   epubBody = null
@@ -1008,6 +1016,292 @@ let epubFragment: string | null = null
 function scrollToFragment(fragment: string): void {
   const found = epubBody?.ownerDocument.getElementById(fragment)
   found?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+/* ── Find in this book ──────────────────────────────────────────────── */
+
+/*
+  Each chapter's searchable text, kept for the session.
+
+  The second search of a book is instant, which matters most for a PDF: its
+  first search reads every page. Kept in memory rather than on disk because a
+  Markdown book is re-read in milliseconds and a PDF's text is already cached by
+  the document itself; persisting would buy a faster first search after a
+  restart at the price of a cache that has to be invalidated when a book is
+  edited, and these books are edited.
+*/
+const chapterTexts = new Map<string, Map<string, string>>()
+const pageTexts = new Map<string, Map<number, string>>()
+
+/** Bumped by every search and by closing the bar, so one overtaken by the next stops. */
+let findRun = 0
+
+/*
+  A jump in progress, which the search makes way for.
+
+  A PDF's search and its drawing share one pdf.js worker, and a first search is
+  hundreds of text extractions long. Clicking a result while that runs put the
+  page the reader asked for behind all of them: it drew seconds late, and the
+  jump gave up waiting for its text before it arrived. The search now pauses
+  while a jump is landing, and carries on after.
+*/
+let jumpToken = 0
+let jumpPending = false
+let findTimer: ReturnType<typeof setTimeout> | null = null
+let findBookId: string | null = null
+
+interface FindHit {
+  readonly chapter: Chapter
+  readonly match: Match
+  /** The page a PDF result is on. Null for every other format. */
+  readonly page: number | null
+}
+
+function openFind(): void {
+  const bar = el<HTMLElement>('find-bar')
+  const input = el<HTMLInputElement>('find-input')
+  if (!bar || !input || !current) return
+
+  if (findBookId !== current.bookId) resetFind()
+  findBookId = current.bookId
+  bar.hidden = false
+
+  // A selection is almost always the thing the reader meant to look for.
+  const selected = window.getSelection()?.toString().trim() ?? ''
+  if (selected && selected.length <= 80 && !selected.includes('\n')) input.value = selected
+
+  input.focus()
+  input.select()
+  if (input.value.trim()) scheduleFind(0)
+}
+
+function closeFind(): void {
+  findRun += 1
+  // A jump still waiting for its page is abandoned with the bar.
+  jumpToken += 1
+  jumpPending = false
+  if (findTimer) clearTimeout(findTimer)
+  findTimer = null
+  const bar = el<HTMLElement>('find-bar')
+  if (bar) bar.hidden = true
+  clearResult()
+}
+
+/** Forget the last search's results, which belonged to whichever book was open. */
+function resetFind(): void {
+  findRun += 1
+  el<HTMLElement>('find-results')?.replaceChildren()
+  const status = el<HTMLElement>('find-status')
+  if (status) status.textContent = ''
+  clearResult()
+}
+
+function scheduleFind(delay = 350): void {
+  if (findTimer) clearTimeout(findTimer)
+  findTimer = setTimeout(() => {
+    findTimer = null
+    void runFind()
+  }, delay)
+}
+
+async function chapterSearchText(book: Book, chapter: Chapter): Promise<string> {
+  let cache = chapterTexts.get(book.id)
+  if (!cache) {
+    cache = new Map()
+    chapterTexts.set(book.id, cache)
+  }
+  const cached = cache.get(chapter.file)
+  if (cached !== undefined) return cached
+
+  const source = await window.lectern.library.chapter(book.id, chapter.file)
+  const text =
+    source === null ? '' : book.format === 'markdown' ? markdownPlain(source) : htmlPlain(source)
+  cache.set(chapter.file, text)
+  return text
+}
+
+async function pageSearchText(book: Book, page: number): Promise<string> {
+  let cache = pageTexts.get(book.id)
+  if (!cache) {
+    cache = new Map()
+    pageTexts.set(book.id, cache)
+  }
+  const cached = cache.get(page)
+  if (cached !== undefined) return cached
+  const text = await pageText(book.id, page)
+  cache.set(page, text)
+  return text
+}
+
+async function runFind(): Promise<void> {
+  const input = el<HTMLInputElement>('find-input')
+  const status = el<HTMLElement>('find-status')
+  const results = el<HTMLElement>('find-results')
+  const book = current ? findBook(index, current.bookId) : null
+  if (!input || !status || !results || !book) return
+
+  const run = ++findRun
+  results.replaceChildren()
+  clearResult()
+
+  const pattern = queryPattern(input.value)
+  if (!pattern) {
+    status.textContent = input.value.trim() ? 'Type at least two characters.' : ''
+    return
+  }
+  // Invariant 5. A scan's text exists only as recognition output, which feeds
+  // speech and nothing else -- said plainly, so an empty result is not read as
+  // the book not containing the word.
+  if (book.format === 'pdf' && book.scanned) {
+    status.textContent = 'This book is a scan, so there is no text to search.'
+    return
+  }
+
+  let found = 0
+  let chaptersWithHits = 0
+  const totalPages = book.chapters.reduce((sum, chapter) => {
+    const range = /^p(\d+)-(\d+)$/.exec(chapter.file)
+    return range ? Math.max(sum, Number(range[2])) : sum
+  }, 0)
+
+  for (const [at, chapter] of book.chapters.entries()) {
+    if (run !== findRun) return
+    const hits: FindHit[] = []
+    let total = 0
+
+    if (book.format === 'pdf') {
+      const range = /^p(\d+)-(\d+)$/.exec(chapter.file)
+      if (!range) continue
+      for (let page = Number(range[1]); page <= Number(range[2]); page += 1) {
+        while (jumpPending && run === findRun) await new Promise((resolve) => setTimeout(resolve, 50))
+        if (run !== findRun) return
+        // Every tenth page: often enough to show it moving, rarely enough that
+        // repainting the status is not what the search spends its time on.
+        if (page % 10 === 1) {
+          status.textContent = `Searching page ${page} of ${totalPages}${found ? ` · ${found} found` : ''}`
+        }
+        const text = await pageSearchText(book, page)
+        const { matches, total: onPage } = findMatches(text, pattern, PER_CHAPTER - hits.length)
+        for (const match of matches) hits.push({ chapter, match, page })
+        total += onPage
+      }
+    } else {
+      status.textContent = `Searching chapter ${at + 1} of ${book.chapters.length}${found ? ` · ${found} found` : ''}`
+      const { matches, total: inChapter } = findMatches(await chapterSearchText(book, chapter), pattern)
+      for (const match of matches) hits.push({ chapter, match, page: null })
+      total = inChapter
+    }
+
+    if (run !== findRun) return
+    if (total === 0) continue
+    found += total
+    chaptersWithHits += 1
+    appendFindGroup(results, book, hits, total - hits.length, pattern)
+  }
+
+  status.textContent =
+    found === 0
+      ? 'Not found in this book.'
+      : `${found} match${found === 1 ? '' : 'es'} in ${chaptersWithHits} chapter${chaptersWithHits === 1 ? '' : 's'}`
+}
+
+function appendFindGroup(
+  into: HTMLElement,
+  book: Book,
+  hits: readonly FindHit[],
+  more: number,
+  pattern: RegExp
+): void {
+  const first = hits[0]
+  if (!first) return
+  into.append(element('div', 'find-chapter', first.chapter.title))
+
+  for (const hit of hits) {
+    const row = element('button', 'find-result')
+    row.type = 'button'
+    // Built from text nodes, never markup: a snippet is book text, and a
+    // chapter containing `<img onerror>` in its prose is still just prose here.
+    row.append(document.createTextNode(hit.match.before))
+    row.append(element('mark', undefined, hit.match.match))
+    row.append(document.createTextNode(hit.match.after))
+    if (hit.page !== null) row.append(element('span', 'find-page', `p. ${hit.page}`))
+    row.addEventListener('click', () => void goToFind(book, hit, pattern))
+    into.append(row)
+  }
+  if (more > 0) into.append(element('span', 'find-more', `…and ${more} more in this chapter`))
+}
+
+async function goToFind(book: Book, hit: FindHit, pattern: RegExp): Promise<void> {
+  if (!current || current.bookId !== book.id) return
+
+  if (book.format === 'pdf' && hit.page !== null) {
+    const token = ++jumpToken
+    jumpPending = true
+    try {
+      if (current.file !== hit.chapter.file) await open(book.id, hit.chapter.file)
+      pdfView?.goToPage(hit.page, true)
+      void pdfView?.drawPage(hit.page)
+      /*
+        A page gets its text layer only once it is drawn, which happens as it
+        scrolls into view -- and a page drawn earlier may since have been
+        released by the virtualiser, leaving a layer in the map that is no longer
+        on screen. So this waits for a layer that is actually attached, for as
+        long as this is still the jump the reader wants.
+      */
+      for (let tries = 0; tries < 150 && token === jumpToken; tries += 1) {
+        const layer = pdfPages.get(hit.page)
+        if (layer?.isConnected) {
+          const range = locate(layer, pattern, hit.match.occurrence)
+          if (range) showResult(range)
+          foldFindResults()
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+    } finally {
+      if (token === jumpToken) jumpPending = false
+    }
+    return
+  }
+
+  if (current.file !== hit.chapter.file) await open(book.id, hit.chapter.file)
+  const body = chapterBody() ?? epubBody
+  if (!body) return
+  const range = locate(body, pattern, hit.match.occurrence)
+  if (range) showResult(range)
+  foldFindResults()
+}
+
+/**
+ * Fold the list away after a jump, leaving the search box.
+ *
+ * The bar sits over the right of the page, and the passage just jumped to was
+ * landing underneath it -- the word found, hidden by the list that found it.
+ * Clicking back into the box brings the list back.
+ */
+function foldFindResults(): void {
+  el<HTMLElement>('find-bar')?.classList.add('is-folded')
+}
+
+function setUpFind(): void {
+  const input = el<HTMLInputElement>('find-input')
+  const unfold = (): void => el<HTMLElement>('find-bar')?.classList.remove('is-folded')
+  input?.addEventListener('focus', unfold)
+  input?.addEventListener('click', unfold)
+  input?.addEventListener('input', () => {
+    unfold()
+    scheduleFind()
+  })
+  input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      scheduleFind(0)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      closeFind()
+    }
+  })
+  el<HTMLButtonElement>('find-close')?.addEventListener('click', closeFind)
 }
 
 /* ── Flagging a passage ──────────────────────────────────────────────── */
@@ -1461,6 +1755,8 @@ function showHome(): void {
   epubBody = null
   reader.stop()
   current = null
+  // Find is for the book being read, and there is none on the shelf.
+  closeFind()
 
   document.body.classList.add('is-home')
   renderHome(
@@ -1621,6 +1917,8 @@ async function removeBook(bookId: string): Promise<void> {
   const result = await window.lectern.library.remove(bookId)
 
   if (result.removed) {
+    chapterTexts.delete(bookId)
+    pageTexts.delete(bookId)
     await load(true)
     showHome()
     announce(`Removed ${book?.title ?? 'the book'}. The file is still where it was.`)
@@ -1651,6 +1949,7 @@ async function showSettings(): Promise<void> {
   cancelScan()
   reader.stop()
   current = null
+  closeFind()
   document.body.classList.add('is-home')
 
   renderSidebar()
@@ -1887,6 +2186,11 @@ async function start(): Promise<void> {
       const previous = previousChapter(book, current.file)
       if (previous) void open(book.id, previous.file)
     }
+    if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      openFind()
+      return
+    }
     if (event.ctrlKey && event.key.toLowerCase() === 'd') {
       event.preventDefault()
       void addBookmarkHere()
@@ -1896,6 +2200,7 @@ async function start(): Promise<void> {
     // control that uses it -- a focused button would otherwise be pressed too.
     if (event.key === 'Escape') {
       closeFlagBar()
+      closeFind()
       return
     }
 
@@ -1977,6 +2282,7 @@ async function start(): Promise<void> {
   renderSidebar()
 
   setUpFlagging()
+  setUpFind()
   setUpDropTarget()
 
   /*
@@ -2002,6 +2308,8 @@ async function start(): Promise<void> {
     friction that the loop stops being used.
   */
   window.lectern.onLibraryChange(() => {
+    // An edited chapter has new text, and a search should find what it says now.
+    chapterTexts.clear()
     if (!current) return
     const container = el<HTMLElement>('content')
     const at = container && chapterBody() ? currentPosition(container, chapterBody()!) : undefined

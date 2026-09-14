@@ -85,6 +85,27 @@ export async function openDocument(bookId: string): Promise<PdfDocumentLike | nu
   return document
 }
 
+/**
+ * One page's text, for searching.
+ *
+ * Read in the renderer, where pdf.js runs its parsing in a Web Worker, rather
+ * than in the main process, where the same library runs on the thread every
+ * other request waits on. A first search of a thousand-page book reads every
+ * page, and invariant 7 says reading is never blocked by work like that.
+ *
+ * Built exactly as the text layer is: each item's string, and a space where
+ * the layer puts a `<br>` at the end of a line. The page is later searched in
+ * the rendered layer, and the two have to agree on where every match is.
+ */
+export async function pageText(bookId: string, page: number): Promise<string> {
+  const document = await openDocument(bookId)
+  if (!document || page < 1 || page > document.numPages) return ''
+  const content = await (await document.getPage(page)).getTextContent()
+  return (content.items as { str?: string; hasEOL?: boolean }[])
+    .map((item) => (item.str ?? '') + (item.hasEOL ? ' ' : ''))
+    .join('')
+}
+
 /** A thumbnail of page one, for the shelf. */
 export async function pdfCover(bookId: string, height = 320): Promise<string | null> {
   try {
@@ -126,8 +147,18 @@ const RENDER_MARGIN = '150% 0px'
 const MAX_DRAWN = 24
 
 export interface PdfView {
-  /** Scroll a page into view. Used by the outline. */
-  goToPage: (page: number) => void
+  /**
+   * Scroll a page into view. Used by the outline, smoothly; a search result
+   * asks for `instant`, since its landing is corrected as the page draws and an
+   * animation in between only delays that.
+   */
+  goToPage: (page: number, instant?: boolean) => void
+  /**
+   * Draw a page now rather than when the scroll brings it into view. For a jump
+   * that needs the page's text: waiting on the observer made the jump's timing
+   * hostage to how promptly the browser delivered it.
+   */
+  drawPage: (page: number) => Promise<void>
   /** The page at the middle of the view, 1-based. What "the section I am in" is measured against. */
   currentPage: () => number
   /** Redraw at a new scale, keeping the reader where they were. */
@@ -283,10 +314,11 @@ export async function renderBook(
   observeAll()
 
   return {
-    goToPage: (page: number) => {
+    goToPage: (page: number, instant = false) => {
       const wrapper = wrappers[Math.max(0, Math.min(page, wrappers.length) - 1)]
-      if (wrapper) scroller.scrollTo({ top: wrapper.offsetTop - 12, behavior: 'smooth' })
+      if (wrapper) scroller.scrollTo({ top: wrapper.offsetTop - 12, behavior: instant ? 'auto' : 'smooth' })
     },
+    drawPage: (page: number) => draw(page),
     currentPage,
     setZoom: async (next: number) => {
       // Keep the reader on the page they were looking at rather than at the

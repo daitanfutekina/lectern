@@ -702,6 +702,36 @@ async function captureAndExit(window: BrowserWindow, path: string): Promise<void
   }
 
   /*
+    Find in the open book. Through the real shortcut and the real input event,
+    so what is exercised is the path a reader takes and not a function called
+    around it. LECTERN_FIND_GO then clicks the first result, which is where
+    landing on the right occurrence is either true or not.
+  */
+  const findQuery = process.env['LECTERN_FIND']
+  if (findQuery) {
+    await window.webContents.executeJavaScript(`
+      (() => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }));
+        const input = document.querySelector('#find-input');
+        if (!input) return 'no find bar';
+        input.value = ${JSON.stringify(findQuery)};
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return 'ok';
+      })()
+    `)
+    const searching = Number(process.env['LECTERN_FIND_WAIT'] ?? '') || 6000
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), searching)
+    })
+    if (process.env['LECTERN_FIND_GO']) {
+      await window.webContents.executeJavaScript(`document.querySelector('.find-result')?.click()`)
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), 4000)
+      })
+    }
+  }
+
+  /*
     Scroll somewhere, then quit. Resuming cannot be verified in one run -- it
     needs a session that reads and leaves, and a second that comes back. The
     wait after scrolling is longer than the progress debounce, so the position
@@ -878,6 +908,54 @@ LIVE-RELOAD-MARKER
       sandbox: f.getAttribute('sandbox')
     })),
     sectionLinks: [...document.querySelectorAll('.section-link')].map((s) => s.textContent).slice(0, 6),
+
+    // Find: what the bar says, what it listed, and whether a result is marked
+    // on the page -- or inside an EPUB's frame, which has a registry of its own.
+    findStatus: document.querySelector('#find-status')?.textContent || null,
+    findResults: document.querySelectorAll('.find-result').length,
+    findChapters: [...document.querySelectorAll('.find-chapter')].map((c) => c.textContent).slice(0, 5),
+    findFirst: document.querySelector('.find-result')?.textContent?.slice(0, 140) ?? null,
+    // Whether a result is marked, and which text: a highlight on our own
+    // pages, the frame's own selection inside an EPUB (see find-view).
+    findMarked: (() => {
+      try {
+        const mark = CSS.highlights && CSS.highlights.get('find');
+        if (mark) return { where: 'page', text: [...mark][0].toString() };
+        const frame = document.querySelector('.epub-frame');
+        const selection = frame && frame.contentWindow && frame.contentWindow.getSelection();
+        if (selection && selection.rangeCount > 0 && selection.toString()) {
+          return { where: 'frame', text: selection.toString() };
+        }
+        return false;
+      } catch (error) {
+        return 'error: ' + error;
+      }
+    })(),
+    // Where the marked text sits within the reader's visible height, 0 at the
+    // top and 1 at the bottom. A jump that marks the right words and leaves
+    // them off screen is the failure this exists to catch.
+    findMarkedAt: (() => {
+      try {
+        const content = document.querySelector('#content');
+        if (!content) return null;
+        let rect = null;
+        const mark = CSS.highlights && CSS.highlights.get('find');
+        if (mark) rect = [...mark][0].getBoundingClientRect();
+        const frame = document.querySelector('.epub-frame');
+        const selection = !rect && frame && frame.contentWindow && frame.contentWindow.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const inner = selection.getRangeAt(0).getBoundingClientRect();
+          const outer = frame.getBoundingClientRect();
+          rect = { top: outer.top + inner.top };
+        }
+        if (!rect) return null;
+        const view = content.getBoundingClientRect();
+        return Math.round(((rect.top - view.top) / content.clientHeight) * 100) / 100;
+      } catch (error) {
+        return 'error: ' + error;
+      }
+    })(),
+    findFolded: document.querySelector('#find-bar')?.classList.contains('is-folded') ?? null,
 
     inlineMathParagraph: (() => {
       const p = [...document.querySelectorAll('.chapter-body p')]

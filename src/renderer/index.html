@@ -51,6 +51,14 @@
       </aside>
 
       <main id="reader">
+        <section id="find-bar" hidden aria-label="Find in this book">
+          <div class="find-row">
+            <input id="find-input" type="search" placeholder="Find in this book" autocomplete="off" spellcheck="false" />
+            <button id="find-close" type="button" title="Close (Esc)">×</button>
+          </div>
+          <p id="find-status" aria-live="polite"></p>
+          <div id="find-results"></div>
+        </section>
         <div id="content">
           <div class="placeholder">
             <p>Choose a chapter.</p>
