@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { assemblePage, cleanPage, repeatedLines, type TextItem } from '@shared/pdf-text'
-import type { BookPart, Chapter } from '@shared/library'
+import type { BookPart, Chapter, PageSection } from '@shared/library'
 
 /**
  * Reading a digital PDF. SPEC section 3.
@@ -137,19 +137,36 @@ async function outlineChapters(
   }
   if (!outline || outline.length < 2) return null
 
-  const starts: { title: string; page: number; sections: string[]; part: string | null }[] = []
+  const starts: {
+    title: string
+    page: number
+    sections: string[]
+    pageSections: PageSection[]
+    part: string | null
+  }[] = []
 
   const record = async (entry: OutlineEntry, part: string | null): Promise<void> => {
     const page = await pageOf(document, entry.dest)
     if (page === null) return
+
+    // The level below is the chapter's sections. The chapter list stays flat
+    // -- a three-deep list is one nobody can scan -- but discarding the
+    // children entirely left every PDF in the library without a section list,
+    // however carefully the publisher had built one.
+    const children = (entry.items ?? []).filter((item) => cleanTitle(item.title))
+    const pageSections: PageSection[] = []
+    for (const child of children) {
+      // A title with no page is still a section worth searching for; it just
+      // has nowhere to jump to, so it stays in `sections` and not here.
+      const at = await pageOf(document, child.dest)
+      if (at !== null) pageSections.push({ title: cleanTitle(child.title), page: at })
+    }
+
     starts.push({
       title: cleanTitle(entry.title) || `Page ${page}`,
       page,
-      // The level below is the chapter's sections. The chapter list stays flat
-      // -- a three-deep list is one nobody can scan -- but discarding the
-      // children entirely left every PDF in the library without a section
-      // list, however carefully the publisher had built one.
-      sections: (entry.items ?? []).map((item) => cleanTitle(item.title)).filter(Boolean),
+      sections: children.map((item) => cleanTitle(item.title)),
+      pageSections,
       part
     })
   }
@@ -174,6 +191,7 @@ async function outlineChapters(
       title: start.title,
       crumb: null,
       headings: start.sections,
+      pageSections: start.pageSections,
       words: Math.max(1, (Math.max(from, to) - from + 1)) * 300
     }
   })

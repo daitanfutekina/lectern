@@ -22,7 +22,25 @@ export interface Chapter {
   readonly crumb: string | null
   /** Section headings, in document order. This is what makes the index searchable. */
   readonly headings: readonly string[]
+  /**
+   * Sections with the page each starts on, for a format with no headings in
+   * its rendered output. A PDF draws canvas pages, so the section list cannot
+   * find headings in the page the way it does for the other formats -- it has
+   * to be told where they are. Absent for everything else.
+   *
+   * Separate from `headings` rather than a parallel array of pages: an outline
+   * entry whose destination cannot be resolved still names a section worth
+   * searching for, but has nowhere to jump to, so the two lists legitimately
+   * differ in length.
+   */
+  readonly pageSections?: readonly PageSection[]
   readonly words: number
+}
+
+export interface PageSection {
+  readonly title: string
+  /** 1-based. */
+  readonly page: number
 }
 
 export interface Book {

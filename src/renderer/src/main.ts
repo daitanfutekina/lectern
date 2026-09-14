@@ -319,7 +319,7 @@ function renderSidebar(): void {
       // Only the open chapter's, for the same reason the sidebar lists only the
       // open book's chapters: every chapter's sections at once is a table of
       // contents, and that is a different screen.
-      if (isCurrent) appendSections(books)
+      if (isCurrent) appendSections(books, book, chapter)
     }
     }
   }
@@ -427,17 +427,73 @@ function sectionHeadings(body: HTMLElement): HTMLElement[] {
   return h2
 }
 
-function appendSections(into: HTMLElement): void {
+/** One row of the section list: what it says, and how to get there. */
+interface SectionEntry {
+  readonly label: string
+  readonly go: () => void
+}
+
+/**
+ * The open chapter's sections, and which of them the reader is in.
+ *
+ * Two sources, because the formats disagree about where sections can be found.
+ * Our books and EPUBs render real headings, so the list is read out of the page
+ * and each row scrolls to its element. A PDF renders canvas pages with no
+ * headings in them at all -- which is why its sections were recorded in the
+ * index for months and never once appeared -- so its rows come from the
+ * outline, and "which section am I in" is a page comparison.
+ */
+function sectionEntries(
+  book: Book,
+  chapter: Chapter
+): { items: SectionEntry[]; here: number } | null {
+  if (book.format === 'pdf') {
+    const sections = chapter.pageSections ?? []
+    if (sections.length === 0 || !pdfView || pdfBookId !== book.id) return null
+
+    const view = pdfView
+    const page = view.currentPage()
+    let here = -1
+    for (const [at, section] of sections.entries()) {
+      if (section.page <= page) here = at
+      else break
+    }
+    return {
+      items: sections.map((section) => ({
+        label: section.title,
+        go: () => view.goToPage(section.page)
+      })),
+      here
+    }
+  }
+
   /*
     An EPUB renders into a frame and never creates `.chapter-body`, so keying
     this to that class alone meant a downloaded book showed no section list at
     all -- not a short one, none.
   */
   const body = chapterBody() ?? epubBody
-  if (!body) return
+  if (!body) return null
 
   const found = sectionHeadings(body)
-  if (found.length === 0) return
+  if (found.length === 0) return null
+
+  return {
+    // The element itself, not an index or an id: it is already in hand, it
+    // cannot go stale while this list is on screen, and the chapter's headings
+    // carry no ids to look up.
+    items: found.map((heading) => ({
+      label: headingLabel(heading),
+      go: () => heading.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    })),
+    here: sectionAt(found)
+  }
+}
+
+function appendSections(into: HTMLElement, book: Book, chapter: Chapter): void {
+  const entries = sectionEntries(book, chapter)
+  if (!entries) return
+  const { items: found, here } = entries
 
   const toggle = element('button', 'section-toggle')
   toggle.type = 'button'
@@ -461,19 +517,12 @@ function appendSections(into: HTMLElement): void {
 
   if (!sectionsOpen) return
 
-  const here = sectionAt(found)
-
   const list = element('div', 'section-list')
-  for (const [at, heading] of found.slice(0, SECTION_LIMIT).entries()) {
-    const link = element('button', 'section-link', headingLabel(heading))
+  for (const [at, entry] of found.slice(0, SECTION_LIMIT).entries()) {
+    const link = element('button', 'section-link', entry.label)
     link.type = 'button'
     link.setAttribute('aria-current', String(at === here))
-    // The element itself, not an index or an id: it is already in hand, it
-    // cannot go stale while this list is on screen, and the chapter's headings
-    // carry no ids to look up.
-    link.addEventListener('click', () => {
-      heading.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    })
+    link.addEventListener('click', entry.go)
     list.append(link)
   }
   if (found.length > SECTION_LIMIT) {
@@ -808,6 +857,12 @@ async function openPdfChapter(
   } else if (target > 1) {
     pdfView.goToPage(target)
   }
+
+  // The sidebar was drawn before the view existed, and a PDF's section list
+  // needs the view to know which page is showing. Without this it appeared
+  // only after the reader first scrolled, and never for a chapter opened at
+  // its first page and read without moving.
+  renderSidebar()
 }
 
 /**

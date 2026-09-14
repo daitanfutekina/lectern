@@ -128,6 +128,8 @@ const MAX_DRAWN = 24
 export interface PdfView {
   /** Scroll a page into view. Used by the outline. */
   goToPage: (page: number) => void
+  /** The page at the middle of the view, 1-based. What "the section I am in" is measured against. */
+  currentPage: () => number
   /** Redraw at a new scale, keeping the reader where they were. */
   setZoom: (zoom: number) => Promise<void>
   zoom: () => number
@@ -285,6 +287,7 @@ export async function renderBook(
       const wrapper = wrappers[Math.max(0, Math.min(page, wrappers.length) - 1)]
       if (wrapper) scroller.scrollTo({ top: wrapper.offsetTop - 12, behavior: 'smooth' })
     },
+    currentPage,
     setZoom: async (next: number) => {
       // Keep the reader on the page they were looking at rather than at the
       // same pixel offset, which means nothing once everything has resized.
