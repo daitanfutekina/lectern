@@ -29,6 +29,18 @@ const api = {
     add: (paths: readonly string[]): Promise<{ added: number; rejected: string[] }> =>
       ipcRenderer.invoke('library:add', paths),
     /**
+     * Take an added document off the shelf, after the main process has asked.
+     *
+     * The file is never deleted and the book's progress is kept. `reason` says
+     * why nothing happened: the reader cancelled, the book is one of ours, or
+     * the file was placed in `pdfs/` or `epubs/` by hand and has to leave from
+     * there.
+     */
+    remove: (
+      bookId: string
+    ): Promise<{ removed: boolean; reason?: 'not-found' | 'not-added' | 'placed-by-hand' | 'cancelled' }> =>
+      ipcRenderer.invoke('library:remove', bookId),
+    /**
      * The real path of a dropped file.
      *
      * `File.path` was removed from Electron; `webUtils` is the supported way to

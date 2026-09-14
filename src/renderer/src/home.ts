@@ -33,6 +33,9 @@ export interface HomeOptions {
   readonly sort: ShelfSort
   readonly facts: (id: string) => SortFacts
   readonly onSort: (sort: ShelfSort) => void
+  /** Whether a book can be taken off the shelf -- an added document, and nothing of ours. */
+  readonly removable: (id: string) => boolean
+  readonly onRemove: (id: string) => void
 }
 
 export function renderHome(
@@ -56,6 +59,11 @@ export function renderHome(
     index.books.length === 0
       ? `Drop a PDF or EPUB here, or put a book folder in ${index.root}\\books`
       : 'Drop a PDF or EPUB anywhere on this window to add it.'
+  // Said only when there is something it applies to, so the hint never offers
+  // an action the shelf in front of the reader cannot perform.
+  if (index.books.some((book) => options.removable(book.id))) {
+    hint.textContent += ' Right-click one you added to remove it.'
+  }
   header.append(hint)
 
   if (index.books.length > 1) {
@@ -81,12 +89,12 @@ export function renderHome(
 
   const entries = index.books.map((book) => shelfEntry(book, progressOf(book)))
   for (const entry of sortShelf(entries, options.sort, options.facts)) {
-    grid.append(card(entry, onOpen))
+    grid.append(card(entry, onOpen, options))
   }
   container.append(grid)
 }
 
-function card(entry: ShelfEntry, onOpen: OnOpen): HTMLElement {
+function card(entry: ShelfEntry, onOpen: OnOpen, options: HomeOptions): HTMLElement {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'shelf-card'
@@ -139,6 +147,22 @@ function card(entry: ShelfEntry, onOpen: OnOpen): HTMLElement {
 
   button.append(art, title, meta)
   button.addEventListener('click', () => onOpen(entry.id))
+
+  /*
+    Right-click to remove, and never a visible button on the card.
+
+    A card is one large target that means "open this". A remove control inside
+    it is a small target sitting where a click to open lands, which is exactly
+    the accident this has to prevent -- and on a touchpad a stray tap is far
+    easier to produce than a two-finger one. The main process then asks before
+    anything changes, with Cancel as the default.
+  */
+  if (options.removable(entry.id)) {
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault()
+      options.onRemove(entry.id)
+    })
+  }
   return button
 }
 

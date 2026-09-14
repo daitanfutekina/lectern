@@ -34,6 +34,11 @@ export interface EpubBook {
  */
 const opened = new Map<string, EpubBook>()
 
+/** Let go of an archive that has left the library, which the session cache would otherwise keep inflated. */
+export function closeEpub(path: string): void {
+  opened.delete(path)
+}
+
 export class DrmProtectedError extends Error {
   constructor() {
     super('This EPUB is DRM-protected and cannot be opened.')

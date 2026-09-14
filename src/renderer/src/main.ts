@@ -1494,7 +1494,11 @@ function showHome(): void {
           settings = updated
         })
         showHome()
-      }
+      },
+      // Only an added document has an added time, which makes the map that
+      // already drives "recently added" the exact list of removable books.
+      removable: (id) => addedTimes.has(id),
+      onRemove: (id) => void removeBook(id)
     }
   )
 
@@ -1610,6 +1614,23 @@ function setUpDropTarget(): void {
 }
 
 /** A brief message in the shelf header. */
+/** Take an added document off the shelf. The main process asks first. */
+async function removeBook(bookId: string): Promise<void> {
+  const book = findBook(index, bookId)
+  const result = await window.lectern.library.remove(bookId)
+
+  if (result.removed) {
+    await load(true)
+    showHome()
+    announce(`Removed ${book?.title ?? 'the book'}. The file is still where it was.`)
+    return
+  }
+  // Cancelling is an answer, not a failure, and needs no reply.
+  if (result.reason === 'placed-by-hand') {
+    announce('That one was put in the library folder by hand. Remove the file from there.')
+  }
+}
+
 function announce(message: string): void {
   const hint = document.querySelector<HTMLElement>('.shelf-hint')
   if (!hint) return

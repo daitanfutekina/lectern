@@ -26,6 +26,7 @@ type PdfDocument = {
   getPageIndex: (ref: unknown) => Promise<number>
   /** Resolves a named destination -- `dest` as a string rather than an array. */
   getDestination: (name: string) => Promise<unknown[] | null>
+  destroy: () => Promise<void>
 }
 interface OutlineEntry {
   title: string
@@ -54,6 +55,21 @@ export interface PdfBook {
 }
 
 const opened = new Map<string, PdfBook>()
+
+/**
+ * Let go of a document that has left the library.
+ *
+ * The session cache holds the parsed file, and for a thousand-page textbook
+ * that is a good deal of memory to keep for a book the reader just removed.
+ */
+export function closePdf(path: string): void {
+  const book = opened.get(path)
+  if (!book) return
+  opened.delete(path)
+  void book.document.destroy().catch(() => {
+    // Already torn down, or never finished opening; either way it is gone.
+  })
+}
 
 function pdfjs(): { getDocument: (options: unknown) => { promise: Promise<PdfDocument> } } {
   return require('pdfjs-dist/legacy/build/pdf.mjs')

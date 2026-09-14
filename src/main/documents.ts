@@ -1,5 +1,5 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { join, extname } from 'node:path'
+import { join, extname, resolve } from 'node:path'
 
 /**
  * Documents the reader added deliberately. SPEC section 3, as amended.
@@ -103,6 +103,19 @@ export async function addDocuments(paths: readonly string[]): Promise<AddResult>
 
   if (added > 0) await persist()
   return { added, rejected }
+}
+
+/**
+ * The stored entry for a path, if the reader added it.
+ *
+ * Compared resolved and case-folded: the book's path is rebuilt by joining a
+ * folder and a file name, the stored one is whatever the drop reported, and on
+ * Windows the two can differ in separators and case while naming one file.
+ */
+export async function findAddedDocument(path: string): Promise<AddedDocument | null> {
+  const wanted = resolve(path).toLowerCase()
+  const all = await loadDocuments()
+  return all.find((entry) => resolve(entry.path).toLowerCase() === wanted) ?? null
 }
 
 export async function removeDocument(path: string): Promise<void> {

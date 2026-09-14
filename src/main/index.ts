@@ -1,14 +1,20 @@
-import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
 import { configureMath, speakMath } from './math-speech'
-import { pdfBytes } from './pdf'
-import { epubCover } from './epub'
+import { closePdf, pdfBytes } from './pdf'
+import { closeEpub, epubCover } from './epub'
 import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
 import { watchLibrary } from './watch'
-import { addDocuments, configureDocuments, livingDocuments } from './documents'
+import {
+  addDocuments,
+  configureDocuments,
+  findAddedDocument,
+  livingDocuments,
+  removeDocument
+} from './documents'
 import {
   characterDir,
   charactersReady,
@@ -479,6 +485,59 @@ app.whenReady().then(async () => {
     // invalidates it.
     if (result.added > 0) cached = null
     return result
+  })
+
+  /*
+    Taking a book off the shelf.
+
+    Only a document the reader added, and only after asking. Both rules live
+    here rather than in the renderer, because the renderer is the least trusted
+    process and a guard it could skip is not a guard.
+
+    Nothing is deleted. An added document is a reference to a file that stays
+    wherever it was, and its progress, bookmarks and flags are kept -- so the
+    worst a mistaken removal can cost is dragging the file back in, at which
+    point it opens where it was left. Our own books in `books/` cannot be
+    removed at all: they are hand-written with no history behind them, and the
+    right protection for those is that the action does not exist.
+  */
+  ipcMain.handle('library:remove', async (event, bookId: unknown) => {
+    if (typeof bookId !== 'string') return { removed: false, reason: 'not-found' }
+    const book = findBook(await library(), bookId)
+    if (!book) return { removed: false, reason: 'not-found' }
+    if (book.format !== 'pdf' && book.format !== 'epub') return { removed: false, reason: 'not-added' }
+
+    const entry = await findAddedDocument(book.path)
+    // A file placed in `pdfs/` or `epubs/` by hand is found by the scan, not
+    // by the registry; dropping a registry entry it never had would change
+    // nothing, and it would be back on the shelf at the next scan.
+    if (!entry) return { removed: false, reason: 'placed-by-hand' }
+
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      type: 'warning' as const,
+      buttons: ['Remove', 'Cancel'],
+      // Enter and Escape both mean "no". The destructive choice has to be a
+      // click on the word, never the key that happened to be under a finger.
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      title: 'Remove from library',
+      message: `Remove "${book.title}" from the library?`,
+      detail:
+        `The file is not deleted -- it stays at\n${entry.path}\n\n` +
+        'Your place in it is kept, so adding it again opens where you left off.'
+    }
+    const { response } = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options)
+    if (response !== 0) return { removed: false, reason: 'cancelled' }
+
+    await removeDocument(entry.path)
+    if (book.format === 'pdf') closePdf(book.path)
+    else closeEpub(book.path)
+    cached = null
+    return { removed: true }
   })
 
   ipcMain.handle('library:added-times', async () => {
