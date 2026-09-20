@@ -16,3 +16,6 @@ secrets.json
 .claude/*
 !.claude/skills/
 CLAUDE.local.md
+
+# Codex dispatch logs (local only)
+.diff_logs/
