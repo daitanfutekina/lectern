@@ -577,7 +577,11 @@ app.whenReady().then(async () => {
       one way to change a cover that needs no feature and no interface.
     */
     try {
-      const found = await bookCover(book.path)
+      // Only for a book that is a folder. A PDF or EPUB is one file, often in
+      // Downloads, where "beside it" is a shared folder -- one stray cover.png
+      // there became the cover of every added book.
+      const found =
+        book.format === 'pdf' || book.format === 'epub' ? null : await bookCover(book.path)
       if (found) return found
     } catch {
       // Unreadable image; fall through to whatever the format offers.
