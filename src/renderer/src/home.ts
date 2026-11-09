@@ -33,6 +33,7 @@ export interface HomeOptions {
   readonly sort: ShelfSort
   readonly facts: (id: string) => SortFacts
   readonly onSort: (sort: ShelfSort) => void
+  readonly onAdd: (files: readonly File[]) => void
   /** Whether a book can be taken off the shelf -- an added document, and nothing of ours. */
   readonly removable: (id: string) => boolean
   readonly onRemove: (id: string) => void
@@ -82,7 +83,10 @@ export function renderHome(
   }
 
   container.append(header)
-  if (index.books.length === 0) return
+  if (index.books.length === 0) {
+    container.append(emptyLibrary(options.onAdd))
+    return
+  }
 
   const grid = document.createElement('div')
   grid.className = 'shelf'
@@ -92,6 +96,38 @@ export function renderHome(
     grid.append(card(entry, onOpen, options))
   }
   container.append(grid)
+}
+
+function emptyLibrary(onAdd: (files: readonly File[]) => void): HTMLElement {
+  const empty = document.createElement('section')
+  empty.className = 'empty-library'
+
+  const mark = document.createElement('div')
+  mark.className = 'empty-library-mark'
+  mark.setAttribute('aria-hidden', 'true')
+  mark.textContent = 'Aa'
+
+  const heading = document.createElement('h3')
+  heading.textContent = 'Your library is ready'
+
+  const message = document.createElement('p')
+  message.textContent = 'Add a PDF or EPUB to start reading. Lectern keeps the file where it is.'
+
+  const picker = document.createElement('input')
+  picker.type = 'file'
+  picker.accept = '.pdf,.epub,application/pdf,application/epub+zip'
+  picker.multiple = true
+  picker.hidden = true
+  picker.addEventListener('change', () => onAdd(Array.from(picker.files ?? [])))
+
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'empty-library-add'
+  button.textContent = 'Add PDF or EPUB'
+  button.addEventListener('click', () => picker.click())
+
+  empty.append(mark, heading, message, picker, button)
+  return empty
 }
 
 function card(entry: ShelfEntry, onOpen: OnOpen, options: HomeOptions): HTMLElement {

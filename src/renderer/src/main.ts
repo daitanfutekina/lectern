@@ -1794,6 +1794,7 @@ function showHome(): void {
       },
       // Only an added document has an added time, which makes the map that
       // already drives "recently added" the exact list of removable books.
+      onAdd: (files) => void addFiles(files),
       removable: (id) => addedTimes.has(id),
       onRemove: (id) => void removeBook(id)
     }
@@ -1890,24 +1891,27 @@ function setUpDropTarget(): void {
 
     const files = Array.from(event.dataTransfer?.files ?? [])
     if (files.length === 0) return
-
-    const paths = files.map((file) => window.lectern.library.pathForFile(file)).filter(Boolean)
-    if (paths.length === 0) return
-
-    void window.lectern.library.add(paths).then(async (result) => {
-      if (result.added > 0) {
-        await load(true)
-        showHome()
-      }
-      if (result.rejected.length > 0) {
-        // Said plainly rather than ignored: a file that vanishes on being
-        // dropped looks like the application is broken.
-        announce(`${result.rejected.length} file(s) skipped — only PDF and EPUB can be added.`)
-      } else if (result.added === 0) {
-        announce('Already in the library.')
-      }
-    })
+    void addFiles(files)
   })
+}
+
+/** Add files chosen from the empty shelf or dropped anywhere on the window. */
+async function addFiles(files: readonly File[]): Promise<void> {
+  const paths = files.map((file) => window.lectern.library.pathForFile(file)).filter(Boolean)
+  if (paths.length === 0) return
+
+  const result = await window.lectern.library.add(paths)
+  if (result.added > 0) {
+    await load(true)
+    showHome()
+  }
+  if (result.rejected.length > 0) {
+    // Said plainly rather than ignored: a file that vanishes while being
+    // chosen looks like the application is broken.
+    announce(`${result.rejected.length} file(s) skipped — only PDF and EPUB can be added.`)
+  } else if (result.added === 0) {
+    announce('Already in the library.')
+  }
 }
 
 /** A brief message in the shelf header. */
