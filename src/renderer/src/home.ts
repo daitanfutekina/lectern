@@ -135,7 +135,11 @@ function card(entry: ShelfEntry, onOpen: OnOpen, options: HomeOptions): HTMLElem
   button.type = 'button'
   button.className = 'shelf-card'
   button.dataset['book'] = entry.id
-  button.title = entry.title
+  button.title =
+    entry.unavailable === 'file-moved'
+      ? `${entry.title} — file moved; click to locate it`
+      : entry.title
+  if (entry.unavailable) button.classList.add('is-unavailable')
 
   const art = document.createElement('div')
   art.className = 'shelf-art'

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, type OpenDialogOptions } from 'electron'
 import { join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
@@ -13,7 +13,9 @@ import {
   addDocuments,
   configureDocuments,
   findAddedDocument,
-  livingDocuments,
+  findAddedDocumentById,
+  loadDocuments,
+  relocateDocument,
   removeDocument
 } from './documents'
 import {
@@ -522,6 +524,34 @@ app.whenReady().then(async () => {
     return result
   })
 
+  ipcMain.handle('library:locate', async (event, bookId: unknown) => {
+    if (typeof bookId !== 'string') return { located: false, reason: 'not-found' }
+    const entry = await findAddedDocumentById(bookId)
+    if (!entry) return { located: false, reason: 'not-found' }
+
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const options: OpenDialogOptions = {
+      title: `Locate ${entry.title}`,
+      properties: ['openFile'],
+      filters: [
+        {
+          name: entry.format === 'pdf' ? 'PDF document' : 'EPUB book',
+          extensions: [entry.format]
+        }
+      ]
+    }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return { located: false, reason: 'cancelled' }
+
+    const relocated = await relocateDocument(bookId, path)
+    if (relocated !== 'relocated') return { located: false, reason: relocated }
+    cached = null
+    return { located: true }
+  })
+
   /*
     Taking a book off the shelf.
 
@@ -577,11 +607,8 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('library:added-times', async () => {
     const times: Record<string, number> = {}
-    for (const entry of await livingDocuments()) {
-      // Both separators, or a Windows path comes back whole.
-      const name = entry.path.split(/[\\/]/).pop() ?? entry.path
-      const format = name.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf'
-      times[`${format}:${name}`] = entry.addedAt
+    for (const entry of await loadDocuments()) {
+      times[entry.id] = entry.addedAt
     }
     return times
   })

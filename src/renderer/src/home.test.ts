@@ -104,12 +104,16 @@ function options(onAdd: (files: readonly File[]) => void = vi.fn()): HomeOptions
   }
 }
 
-function render(books: readonly Book[], onAdd?: (files: readonly File[]) => void): FakeElement {
+function render(
+  books: readonly Book[],
+  onAdd?: (files: readonly File[]) => void,
+  onOpen: (bookId: string) => void = vi.fn()
+): FakeElement {
   vi.stubGlobal('document', {
     createElement: (tagName: string) => new FakeElement(tagName)
   })
   const container = new FakeElement('main')
-  renderHome(container as unknown as HTMLElement, index(books), () => null, vi.fn(), options(onAdd))
+  renderHome(container as unknown as HTMLElement, index(books), () => null, onOpen, options(onAdd))
   return container
 }
 
@@ -142,5 +146,16 @@ describe('empty library', () => {
 
     expect(findByClass(container, 'empty-library')).toBeNull()
     expect(findByClass(container, 'shelf')).not.toBeNull()
+  })
+
+  it('marks a moved file and makes its card the locate action', () => {
+    const onOpen = vi.fn()
+    const moved = { ...book, unavailable: 'file-moved' as const }
+    const container = render([moved], undefined, onOpen)
+    const card = findByClass(container, 'is-unavailable')
+
+    expect(findByClass(container, 'shelf-meta')?.textContent).toBe('File moved · Click to locate')
+    card?.click()
+    expect(onOpen).toHaveBeenCalledWith('one')
   })
 })

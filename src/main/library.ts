@@ -2,9 +2,10 @@ import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { parseManifest, splitFrontMatter } from '@shared/manifest'
 import { extractHeadings, countWords } from '@shared/outline'
+import { classifyDocumentFailure, missingDocumentBook } from '@shared/added-document'
 import { epubDocument, openEpub } from './epub'
 import { openPdf, pdfChapter } from './pdf'
-import { livingDocuments } from './documents'
+import { loadDocuments } from './documents'
 import type { Book, Chapter, DocumentFormat, LibraryIndex } from '@shared/library'
 
 /**
@@ -192,17 +193,27 @@ function note(name: string, error: unknown): void {
 }
 
 async function scanAddedDocuments(): Promise<Book[]> {
-  const entries = await livingDocuments()
+  const entries = await loadDocuments()
   const books = await Promise.all(
     entries.map(async (entry) => {
-      // Both separators: a Windows path split on `/` alone comes back whole,
-      // and the book's id then carries its entire absolute path.
-      const name = entry.path.split(/[\\/]/).pop() ?? entry.path
-      const format: DocumentFormat = name.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf'
       try {
-        return await readFileBook(entry.path.slice(0, entry.path.length - name.length), name, format)
+        const info = await stat(entry.path)
+        if (!info.isFile()) throw new Error('registered path is not a file')
       } catch (error) {
-        note(name, error)
+        if (classifyDocumentFailure(error) === 'absent') return missingDocumentBook(entry)
+        note(entry.title, error)
+        return null
+      }
+
+      try {
+        const name = entry.path.split(/[\\/]/).pop() ?? entry.path
+        const book = await readFileBook(dirname(entry.path), name, entry.format)
+        return book ? { ...book, id: entry.id } : null
+      } catch (error) {
+        // The file can disappear between stat and open. That is still a move,
+        // while a present corrupt or unreadable file remains an open failure.
+        if (classifyDocumentFailure(error) === 'absent') return missingDocumentBook(entry)
+        note(entry.title, error)
         return null
       }
     })

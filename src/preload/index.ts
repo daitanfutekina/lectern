@@ -28,6 +28,13 @@ const api = {
      */
     add: (paths: readonly string[]): Promise<{ added: number; rejected: string[] }> =>
       ipcRenderer.invoke('library:add', paths),
+    /** Choose the new path for a registered file while keeping its progress id. */
+    locate: (
+      bookId: string
+    ): Promise<{
+      located: boolean
+      reason?: 'not-found' | 'cancelled' | 'wrong-format' | 'already-added' | 'unreadable'
+    }> => ipcRenderer.invoke('library:locate', bookId),
     /**
      * Take an added document off the shelf, after the main process has asked.
      *

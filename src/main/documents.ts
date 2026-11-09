@@ -1,5 +1,12 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join, extname, resolve } from 'node:path'
+import {
+  createAddedDocument,
+  documentFormat,
+  parseAddedDocuments,
+  relocateAddedDocument,
+  type AddedDocument
+} from '@shared/added-document'
 
 /**
  * Documents the reader added deliberately. SPEC section 3, as amended.
@@ -13,11 +20,6 @@ import { join, extname, resolve } from 'node:path'
  * who moves their own file expects the library to notice rather than to keep
  * serving a stale duplicate.
  */
-
-export interface AddedDocument {
-  readonly path: string
-  readonly addedAt: number
-}
 
 const ACCEPTED = new Set(['.pdf', '.epub'])
 
@@ -36,15 +38,7 @@ const storePath = (): string => join(root, '.library', 'documents.json')
 export async function loadDocuments(): Promise<AddedDocument[]> {
   if (loaded) return documents
   try {
-    const parsed: unknown = JSON.parse(await readFile(storePath(), 'utf8'))
-    documents = Array.isArray(parsed)
-      ? parsed
-          .filter(
-            (entry): entry is AddedDocument =>
-              Boolean(entry) && typeof (entry as AddedDocument).path === 'string'
-          )
-          .map((entry) => ({ path: entry.path, addedAt: entry.addedAt ?? 0 }))
-      : []
+    documents = parseAddedDocuments(JSON.parse(await readFile(storePath(), 'utf8')))
   } catch {
     documents = []
   }
@@ -53,9 +47,12 @@ export async function loadDocuments(): Promise<AddedDocument[]> {
 }
 
 async function persist(): Promise<void> {
+  const target = storePath()
+  const temporary = `${target}.tmp`
   try {
     await mkdir(join(root, '.library'), { recursive: true })
-    await writeFile(storePath(), JSON.stringify(documents, null, 2), 'utf8')
+    await writeFile(temporary, JSON.stringify(documents, null, 2), 'utf8')
+    await rename(temporary, target)
   } catch {
     // The document is still open; it just will not be there next time.
   }
@@ -96,7 +93,12 @@ export async function addDocuments(paths: readonly string[]): Promise<AddResult>
       continue
     }
 
-    documents.push({ path, addedAt: Date.now() })
+    const entry = createAddedDocument(path, Date.now())
+    if (!entry) {
+      rejected.push(path)
+      continue
+    }
+    documents.push(entry)
     known.add(path.toLowerCase())
     added += 1
   }
@@ -118,24 +120,44 @@ export async function findAddedDocument(path: string): Promise<AddedDocument | n
   return all.find((entry) => resolve(entry.path).toLowerCase() === wanted) ?? null
 }
 
+export async function findAddedDocumentById(id: string): Promise<AddedDocument | null> {
+  const all = await loadDocuments()
+  return all.find((entry) => entry.id === id) ?? null
+}
+
+export type RelocateResult = 'relocated' | 'not-found' | 'wrong-format' | 'already-added' | 'unreadable'
+
+/** Update only a registry path; the id is the progress key and must not change. */
+export async function relocateDocument(id: string, path: string): Promise<RelocateResult> {
+  await loadDocuments()
+  const at = documents.findIndex((entry) => entry.id === id)
+  if (at < 0) return 'not-found'
+
+  const current = documents[at]
+  if (!current || documentFormat(path) !== current.format) return 'wrong-format'
+  if (
+    documents.some(
+      (entry, index) => index !== at && resolve(entry.path).toLowerCase() === resolve(path).toLowerCase()
+    )
+  ) {
+    return 'already-added'
+  }
+  try {
+    if (!(await stat(path)).isFile()) return 'unreadable'
+  } catch {
+    return 'unreadable'
+  }
+
+  const relocated = relocateAddedDocument(current, path)
+  if (!relocated) return 'wrong-format'
+  documents = documents.map((entry, index) => (index === at ? relocated : entry))
+  await persist()
+  return 'relocated'
+}
+
 export async function removeDocument(path: string): Promise<void> {
   await loadDocuments()
   const before = documents.length
   documents = documents.filter((entry) => entry.path.toLowerCase() !== path.toLowerCase())
   if (documents.length !== before) await persist()
-}
-
-/** Paths that still exist, so a moved or deleted file quietly drops out. */
-export async function livingDocuments(): Promise<AddedDocument[]> {
-  const all = await loadDocuments()
-  const alive: AddedDocument[] = []
-  for (const entry of all) {
-    try {
-      if ((await stat(entry.path)).isFile()) alive.push(entry)
-    } catch {
-      // Gone. Left in the store rather than deleted: a file on a drive that is
-      // not plugged in right now has not been thrown away.
-    }
-  }
-  return alive
 }

@@ -68,6 +68,8 @@ export interface Book {
    * and has to be able to say so rather than appear to contain nothing.
    */
   readonly scanned?: boolean
+  /** A registered file that is not at its recorded path and cannot be opened yet. */
+  readonly unavailable?: 'file-moved'
 }
 
 export interface LibraryIndex {

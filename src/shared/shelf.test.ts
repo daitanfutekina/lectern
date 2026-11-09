@@ -35,6 +35,10 @@ describe('initials', () => {
 })
 
 describe('shelfSubtitle', () => {
+  it('marks a moved file and tells the reader how to restore it', () => {
+    expect(shelfSubtitle(entry({ unavailable: 'file-moved' }))).toBe('File moved · Click to locate')
+  })
+
   it('abbreviates a large word count', () => {
     expect(shelfSubtitle(entry())).toBe('6 chapters · 13k words')
   })

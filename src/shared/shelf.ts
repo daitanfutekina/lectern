@@ -21,6 +21,7 @@ export interface ShelfEntry {
   readonly progress: number | null
   /** Data URL of the cover, filled in asynchronously. */
   readonly cover: string | null
+  readonly unavailable?: 'file-moved'
 }
 
 export const FORMAT_BADGE: Readonly<Record<DocumentFormat, string>> = {
@@ -52,7 +53,8 @@ export function shelfEntry(book: Book, progress: number | null): ShelfEntry {
     chapters: book.chapters.length,
     words: book.chapters.reduce((total, chapter) => total + chapter.words, 0),
     progress,
-    cover: null
+    cover: null,
+    unavailable: book.unavailable
   }
 }
 
@@ -80,6 +82,7 @@ export function initials(title: string): string {
 
 /** Compact size for the card: "6 chapters · 12k words". */
 export function shelfSubtitle(entry: ShelfEntry): string {
+  if (entry.unavailable === 'file-moved') return 'File moved · Click to locate'
   const chapters = `${entry.chapters} chapter${entry.chapters === 1 ? '' : 's'}`
   if (entry.words <= 0) return chapters
   const words =

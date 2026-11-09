@@ -1765,6 +1765,10 @@ function showHome(): void {
     progressOf,
     (bookId) => {
       const book = findBook(index, bookId)
+      if (book?.unavailable === 'file-moved') {
+        void locateBook(book.id)
+        return
+      }
       const stored = bookProgress(bookId)
       // Opening a book means continuing it, not restarting it.
       const last = stored.lastChapter
@@ -1826,7 +1830,7 @@ function progressOf(book: Book): number | null {
  */
 async function loadCovers(): Promise<void> {
   for (const book of index.books) {
-    if (hasCover(book.id)) continue
+    if (book.unavailable || hasCover(book.id)) continue
 
     /*
       An image beside the book first, whatever the format.
@@ -1914,7 +1918,21 @@ async function addFiles(files: readonly File[]): Promise<void> {
   }
 }
 
-/** A brief message in the shelf header. */
+/** Ask for a moved file's new path, then repaint it under the same progress id. */
+async function locateBook(bookId: string): Promise<void> {
+  const book = findBook(index, bookId)
+  const result = await window.lectern.library.locate(bookId)
+  if (result.located) {
+    await load(true)
+    showHome()
+    announce(`Found ${book?.title ?? 'the book'}. Your reading progress is unchanged.`)
+    return
+  }
+  if (result.reason === 'wrong-format') announce('Choose the same kind of file as the missing book.')
+  if (result.reason === 'already-added') announce('That file is already on the shelf.')
+  if (result.reason === 'unreadable') announce('That file could not be opened.')
+}
+
 /** Take an added document off the shelf. The main process asks first. */
 async function removeBook(bookId: string): Promise<void> {
   const book = findBook(index, bookId)
@@ -1934,6 +1952,7 @@ async function removeBook(bookId: string): Promise<void> {
   }
 }
 
+/** A brief message in the shelf header. */
 function announce(message: string): void {
   const hint = document.querySelector<HTMLElement>('.shelf-hint')
   if (!hint) return

@@ -1458,6 +1458,15 @@ body.is-home #flag-bar {
   outline-offset: 2px;
 }
 
+.shelf-card.is-unavailable .shelf-art {
+  filter: grayscale(0.75);
+  opacity: 0.62;
+}
+
+.shelf-card.is-unavailable .shelf-meta {
+  color: var(--warn);
+}
+
 .shelf-art img {
   display: block;
   width: 100%;
