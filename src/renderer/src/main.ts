@@ -45,6 +45,12 @@ import { resolveHref, splitHref } from '@shared/epub'
 import type { PrepareProgress } from '@shared/speech-cache'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
 import { mathUtterance } from '@shared/math-gate'
+import {
+  pdfChapterAtPage,
+  pdfPageCount,
+  pdfPageRange,
+  pdfPageTarget
+} from '@shared/pdf-navigation'
 
 /**
  * The reading surface. SPEC section 10: no Node access, no filesystem, no
@@ -181,6 +187,7 @@ function applyRecorded(
 /** Hand a coalesced position to the main process and fold the answer back in. */
 function record(position: ReadingPosition, blocks: number): void {
   if (!current || restoring) return
+  refreshPdfLocation()
   const { bookId, file } = current
 
   void window.lectern.progress.record(bookId, file, position, blocks).then((updated) => {
@@ -190,6 +197,7 @@ function record(position: ReadingPosition, blocks: number): void {
 
 function recordNow(position: ReadingPosition, blocks: number): void {
   if (!current || restoring) return
+  refreshPdfLocation()
   const { bookId, file } = current
   const updated = window.lectern.progress.recordNow(bookId, file, position, blocks)
   if (updated) applyRecorded(bookId, file, updated, false)
@@ -206,6 +214,16 @@ function recordNow(position: ReadingPosition, blocks: number): void {
  */
 function recordHere(): void {
   positionTracker?.flush()
+}
+
+/** Keep the PDF page field and the page-derived sidebar state in step with the scroller. */
+function refreshPdfLocation(): void {
+  if (!pdfView || !pdfBookId) return
+
+  const input = el<HTMLInputElement>('pdf-page')
+  if (input && document.activeElement !== input) input.value = String(pdfView.currentPage())
+
+  if (sidebarFingerprint() !== renderedSidebarFingerprint) renderSidebar()
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
@@ -228,6 +246,15 @@ let renderedSidebarFingerprint = ''
 
 const partIsOpen = (title: string, holdsCurrent: boolean): boolean =>
   partsFolded.has(title) ? !holdsCurrent : holdsCurrent
+
+/** The chapter under the reader, which can differ from the one used to open a whole-book PDF. */
+function sidebarChapter(book: Book): Chapter | null {
+  const opened = book.chapters.find(
+    (chapter) => current?.bookId === book.id && current.file === chapter.file
+  ) ?? null
+  if (book.format !== 'pdf' || !pdfView || pdfBookId !== book.id) return opened
+  return pdfChapterAtPage(book.chapters, pdfView.currentPage()) ?? opened
+}
 
 function togglePart(title: string): void {
   if (partsFolded.has(title)) partsFolded.delete(title)
@@ -271,11 +298,12 @@ function renderSidebar(): void {
   for (const book of shown) {
     books.append(element('div', 'book-title', book.title))
     const stored = bookProgress(book.id)
+    const activeChapter = sidebarChapter(book)
 
     for (const group of groupChapters(book)) {
       if (group.title) {
         const holdsCurrent = group.chapters.some(
-          (c) => current?.bookId === book.id && current.file === c.file
+          (chapter) => activeChapter?.file === chapter.file
         )
         const open = partIsOpen(group.title, holdsCurrent)
 
@@ -330,7 +358,7 @@ function renderSidebar(): void {
         button.append(track)
       }
 
-      const isCurrent = current?.bookId === book.id && current.file === chapter.file
+      const isCurrent = activeChapter?.file === chapter.file
       button.setAttribute('aria-current', String(isCurrent))
       // Addressable, so a verification run can open a specific chapter rather
       // than counting positions in a list that changes as books are added.
@@ -519,12 +547,14 @@ function sidebarFingerprint(): string {
   if (!current) return 'home'
 
   const book = findBook(index, current.bookId)
-  const chapter = book?.chapters.find((entry) => entry.file === current?.file) ?? null
-  const stored = bookProgress(current.bookId).chapters[current.file] ?? null
+  const chapter = book ? sidebarChapter(book) : null
+  const stored = chapter ? (bookProgress(current.bookId).chapters[chapter.file] ?? null) : null
   const section =
     sectionsOpen && book && chapter ? (sectionEntries(book, chapter)?.here ?? -1) : -1
 
-  return [current.bookId, current.file, sidebarProgressKey(stored, section)].join('\u0000')
+  return [current.bookId, chapter?.file ?? current.file, sidebarProgressKey(stored, section)].join(
+    '\u0000'
+  )
 }
 
 function appendSections(into: HTMLElement, book: Book, chapter: Chapter): void {
@@ -621,12 +651,53 @@ function renderNav(book: Book | null, chapter: Chapter | null): void {
   mark.title = 'Bookmark this spot'
   mark.addEventListener('click', () => void addBookmarkHere())
 
+  let pageControl: HTMLFormElement | null = null
+  if (book.format === 'pdf') {
+    const pages = pdfPageCount(book.chapters)
+    const range = pdfPageRange(chapter.file)
+    const shownPage =
+      pdfView && pdfBookId === book.id ? pdfView.currentPage() : (range?.from ?? 1)
+
+    pageControl = element('form', 'pdf-page-control')
+    pageControl.setAttribute('aria-label', 'Go to PDF page')
+
+    const label = element('label', undefined, 'Page')
+    label.htmlFor = 'pdf-page'
+
+    const input = element('input')
+    input.id = 'pdf-page'
+    input.type = 'number'
+    input.min = '1'
+    input.max = String(pages)
+    input.step = '1'
+    input.value = String(shownPage)
+    input.setAttribute('aria-label', `Page, ${pages} pages total`)
+
+    const total = element('span', undefined, `of ${pages}`)
+    const go = element('button', undefined, 'Go')
+    go.type = 'submit'
+
+    pageControl.append(label, input, total, go)
+    pageControl.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const page = pdfPageTarget(input.value, pages)
+      if (page === null) {
+        input.value = String(pdfView?.currentPage() ?? shownPage)
+        return
+      }
+      input.value = String(page)
+      pdfView?.goToPage(page)
+    })
+  }
+
   const forward = element('button', undefined, next ? `${next.title} →` : 'End of book →')
   forward.type = 'button'
   forward.disabled = next === null
   if (next) forward.addEventListener('click', () => void open(book.id, next.file))
 
-  nav.append(back, mark, forward)
+  nav.append(back, mark)
+  if (pageControl) nav.append(pageControl)
+  nav.append(forward)
 }
 
 /* ── Bookmarks ───────────────────────────────────────────────────────── */
@@ -908,6 +979,7 @@ async function openPdfChapter(
   // needs the view to know which page is showing. Without this it appeared
   // only after the reader first scrolled, and never for a chapter opened at
   // its first page and read without moving.
+  refreshPdfLocation()
   renderSidebar()
 }
 

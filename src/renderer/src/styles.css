@@ -877,6 +877,32 @@ figure.fig figcaption {
   opacity: 0.5;
 }
 
+.pdf-page-control {
+  display: flex;
+  flex: none;
+  gap: 7px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pdf-page-control input {
+  width: 6ch;
+  padding: 6px 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pdf-page-control input:focus-visible {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
 /* ── Reading progress ──────────────────────────────────────────────── */
 
 .chapter-row {
