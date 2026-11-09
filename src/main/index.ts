@@ -1,4 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, type OpenDialogOptions } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  net,
+  protocol,
+  shell,
+  type OpenDialogOptions
+} from 'electron'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
@@ -55,6 +66,45 @@ import { bookmarkId } from '@shared/progress'
 import type { LibraryIndex } from '@shared/library'
 import type { ReadingPosition } from '@shared/progress'
 import type { VoiceDownloadResponse } from '@shared/voice-download'
+import { formatFatalError, type FatalErrorKind } from '@shared/fatal-error'
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+// Auto-hiding Electron's default menu still leaves it reachable with Alt, and
+// its View submenu exposes developer tools. Lectern has no application actions
+// that need a native menu, so do not create one.
+Menu.setApplicationMenu(null)
+
+let reportingFatalError = false
+
+function reportFatalError(kind: FatalErrorKind, reason: unknown): void {
+  if (reportingFatalError) return
+  reportingFatalError = true
+
+  const logPath = join(app.getPath('userData'), 'lectern-errors.log')
+  let logFailure: unknown = null
+  try {
+    mkdirSync(app.getPath('userData'), { recursive: true })
+    appendFileSync(logPath, formatFatalError(kind, reason), 'utf8')
+  } catch (error) {
+    logFailure = error
+  }
+
+  const detail = logFailure
+    ? `Lectern could not write its error log at:\n${logPath}\n\nPlease restart Lectern.`
+    : `Details were written to:\n${logPath}\n\nPlease restart Lectern.`
+
+  try {
+    dialog.showErrorBox('Lectern encountered an error', detail)
+  } finally {
+    // Node cannot promise that application state is sound after an uncaught
+    // main-process failure. The synchronous log and dialog happen first.
+    app.exit(1)
+  }
+}
+
+process.on('uncaughtException', (error) => reportFatalError('Uncaught exception', error))
+process.on('unhandledRejection', (reason) => reportFatalError('Unhandled rejection', reason))
 
 /**
  * The renderer is served from `app://` rather than `file://`.
@@ -170,7 +220,10 @@ function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
       // sandbox is what keeps a malformed chapter from mattering.
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      // A packaged reader has no diagnostic console and no menu or shortcut
+      // should be able to create one. Development keeps the ordinary tooling.
+      devTools: !app.isPackaged
     }
   })
 
@@ -260,7 +313,20 @@ function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
   return window
 }
 
-app.whenReady().then(async () => {
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (!window) return
+  if (window.isMinimized()) window.restore()
+  if (!window.isVisible()) window.show()
+  window.focus()
+})
+
+void app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return
   app.setAppUserModelId('com.lectern.app')
   const resolvedRoot = await resolveLibraryRoot(app.getPath('userData'))
   if (!resolvedRoot) {
