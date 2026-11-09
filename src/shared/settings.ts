@@ -12,9 +12,6 @@ import { isShelfSort, type ShelfSort } from './shelf'
  */
 
 export interface Settings {
-  /** Where the library lives. Changing it needs a restart. */
-  readonly root: string
-
   /* Reading */
   readonly fontScale: number
   readonly measure: number
@@ -71,7 +68,6 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  root: 'C:\\Library',
   fontScale: 1,
   measure: 72,
   theme: 'dark',
@@ -104,9 +100,6 @@ const num = (value: unknown, fallback: number, min: number, max: number): number
 const bool = (value: unknown, fallback: boolean): boolean =>
   typeof value === 'boolean' ? value : fallback
 
-const str = (value: unknown, fallback: string): string =>
-  typeof value === 'string' && value.trim() ? value : fallback
-
 export function parseSettings(source: string): Settings {
   let raw: unknown
   try {
@@ -119,7 +112,6 @@ export function parseSettings(source: string): Settings {
   const shape = isRecord(raw['shape']) ? raw['shape'] : {}
 
   return {
-    root: str(raw['root'], DEFAULT_SETTINGS.root),
     // Below 0.8 the grid stops being readable and above 1.6 two words fit a
     // line; neither is a setting anyone wants to be able to reach.
     fontScale: num(raw['fontScale'], 1, 0.8, 1.6),

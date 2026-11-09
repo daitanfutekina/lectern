@@ -97,7 +97,9 @@ const api = {
     set: (change: Partial<Settings>): Promise<Settings> =>
       ipcRenderer.invoke('settings:set', change),
     /** Open the library folder in the file manager. */
-    reveal: (): Promise<void> => ipcRenderer.invoke('settings:reveal')
+    reveal: (): Promise<void> => ipcRenderer.invoke('settings:reveal'),
+    /** Choose a different library folder; the app restarts after a change. */
+    changeLibrary: (): Promise<boolean> => ipcRenderer.invoke('settings:change-library')
   },
 
   voice: {

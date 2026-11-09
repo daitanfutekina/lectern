@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'elect
 import { join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
+import { changeLibraryRoot, resolveLibraryRoot } from './library-location'
 import { configureMath, speakMath } from './math-speech'
 import { closePdf, pdfBytes } from './pdf'
 import { closeEpub, epubCover } from './epub'
@@ -89,6 +90,7 @@ protocol.registerSchemesAsPrivileged([
  */
 
 let cached: LibraryIndex | null = null
+let libraryRoot = DEFAULT_ROOT
 
 async function library(rescan = false): Promise<LibraryIndex> {
   if (!cached || rescan) {
@@ -107,7 +109,7 @@ async function library(rescan = false): Promise<LibraryIndex> {
  * application is supposed to stop happening.
  */
 function root(): string {
-  return process.env['LECTERN_ROOT'] || DEFAULT_ROOT
+  return libraryRoot
 }
 
 /**
@@ -255,6 +257,12 @@ function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
 
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.lectern.app')
+  const resolvedRoot = await resolveLibraryRoot(app.getPath('userData'))
+  if (!resolvedRoot) {
+    app.quit()
+    return
+  }
+  libraryRoot = resolvedRoot
   configureOcrCache(root())
   configureFlags(root())
   configureDocuments(root())
@@ -293,6 +301,21 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('settings:reveal', async () => {
     await shell.openPath(root())
+  })
+
+  ipcMain.handle('settings:change-library', async (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return false
+    const changed = await changeLibraryRoot(app.getPath('userData'), root(), window)
+    if (changed) {
+      // Every library-backed service is configured at startup, so restart only
+      // after the picker has completed and the replacement root is ready.
+      setTimeout(() => {
+        app.relaunch()
+        app.quit()
+      }, 0)
+    }
+    return changed
   })
 
   ipcMain.handle('voice:list', () => listVoices())

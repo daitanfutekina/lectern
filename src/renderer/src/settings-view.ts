@@ -16,6 +16,7 @@ import type { PiperVoice } from '@shared/voice'
 
 export interface SettingsContext {
   readonly settings: Settings
+  readonly libraryRoot: string
   readonly neuralVoices: readonly PiperVoice[]
   readonly systemVoices: readonly { name: string; lang: string }[]
   readonly voicesFolder: string
@@ -29,6 +30,7 @@ export interface SettingsContext {
   readonly onChange: (change: Partial<Settings>) => void
   readonly onClearStore: (done: () => void) => void
   readonly onReveal: () => void
+  readonly onChangeLibrary: () => void
   readonly onRescan: () => void
   readonly onExportIndex: (done: () => void) => void
   readonly onPreview: (text: string) => void
@@ -377,6 +379,12 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
   reveal.textContent = 'Open library folder'
   reveal.addEventListener('click', context.onReveal)
 
+  const changeLibrary = document.createElement('button')
+  changeLibrary.type = 'button'
+  changeLibrary.className = 'settings-button'
+  changeLibrary.textContent = 'Change library folder'
+  changeLibrary.addEventListener('click', context.onChangeLibrary)
+
   const rescan = document.createElement('button')
   rescan.type = 'button'
   rescan.className = 'settings-button'
@@ -400,8 +408,9 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
   page.append(
     section('Library', [
       row('Shelf order', sort),
-      row('Location', text(context.settings.root)),
+      row('Location', text(context.libraryRoot)),
       row('', reveal),
+      row('', changeLibrary),
       row('', rescan),
       row('', index),
       note('Only the books folder is scanned. PDFs and EPUBs join the library by being dropped on the window, and are read where they live rather than copied.')

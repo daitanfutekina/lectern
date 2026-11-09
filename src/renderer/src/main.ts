@@ -1957,6 +1957,7 @@ async function showSettings(): Promise<void> {
 
   renderSettings(container, {
     settings,
+    libraryRoot: index.root,
     neuralVoices: await neuralVoices(),
     systemVoices: speechSynthesis.getVoices().map((voice) => ({
       name: voice.name,
@@ -1974,6 +1975,7 @@ async function showSettings(): Promise<void> {
       changeSettings(change, () => void showSettings())
     },
     onReveal: () => void window.lectern.settings.reveal(),
+    onChangeLibrary: () => void window.lectern.settings.changeLibrary(),
     onRescan: () => void load(true).then(showHome),
     onExportIndex: (done) => void window.lectern.flags.exportIndex().then(done),
     onPreview: (text) => {

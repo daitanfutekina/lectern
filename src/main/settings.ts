@@ -16,7 +16,7 @@ let loaded = false
 
 export function configureSettings(libraryRoot: string): void {
   root = libraryRoot
-  current = { ...DEFAULT_SETTINGS, root: libraryRoot }
+  current = DEFAULT_SETTINGS
   loaded = false
 }
 
@@ -27,7 +27,7 @@ export async function loadSettings(): Promise<Settings> {
   try {
     current = parseSettings(await readFile(path(), 'utf8'))
   } catch {
-    current = { ...DEFAULT_SETTINGS, root }
+    current = DEFAULT_SETTINGS
   }
   loaded = true
   return current
