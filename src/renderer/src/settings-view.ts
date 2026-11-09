@@ -1,6 +1,7 @@
 import { SORT_LABELS, SORT_ORDER } from '@shared/shelf'
 import type { Settings } from '@shared/settings'
 import type { PiperVoice } from '@shared/voice'
+import { voiceDownloadControl, type VoiceDownloadActions } from './voice-download-view'
 
 /**
  * The settings page. SPEC section 7.
@@ -34,6 +35,7 @@ export interface SettingsContext {
   readonly onRescan: () => void
   readonly onExportIndex: (done: () => void) => void
   readonly onPreview: (text: string) => void
+  readonly voiceDownload: VoiceDownloadActions
 }
 
 export function renderSettings(container: HTMLElement, context: SettingsContext): void {
@@ -203,7 +205,10 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
     )
   } else {
     voiceControls.push(
-      note(`No neural voice installed. Put a Piper voice folder in ${context.voicesFolder} to get one.`)
+      note(
+        `No neural voice installed. Download the free Lessac voice, or put a Piper voice folder in ${context.voicesFolder}.`
+      ),
+      row('', voiceDownloadControl(context.voiceDownload))
     )
   }
 

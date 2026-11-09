@@ -39,6 +39,7 @@ import { clearResult, locate, showResult } from './find-view'
 import { PER_CHAPTER, findMatches, htmlPlain, markdownPlain, queryPattern, type Match } from '@shared/find'
 import { renderEpub } from './epub-view'
 import { chapterFragment } from './chapter-assets'
+import type { VoiceDownloadActions } from './voice-download-view'
 import { resolveHref, splitHref } from '@shared/epub'
 import type { PrepareProgress } from '@shared/speech-cache'
 import { FLAG_LABELS, excerpt, type Flag, type FlagKind } from '@shared/flags'
@@ -73,6 +74,10 @@ let flagging: HTMLElement | null = null
 
 /** Everything the reader can change, loaded once at startup. */
 let settings: Settings = DEFAULT_SETTINGS
+let neuralVoiceInstalled = false
+let refreshNeuralVoices: () => Promise<void> = async () => {
+  neuralVoiceInstalled = (await neuralVoices()).length > 0
+}
 
 /**
  * How the shelf is ordered, remembered between sessions.
@@ -1587,7 +1592,8 @@ async function setUpPlayer(): Promise<void> {
     were not good enough, so putting those at the top of the list would be
     showing them the thing they were trying to get away from.
   */
-  const neural = await neuralVoices()
+  let neural = await neuralVoices()
+  neuralVoiceInstalled = neural.length > 0
 
   // Shape controls only matter for a neural voice; the system ones expose
   // nothing but a rate.
@@ -1734,6 +1740,23 @@ async function setUpPlayer(): Promise<void> {
   // empty for the whole session.
   fill(await voices())
   onVoicesChanged(() => fill(speechSynthesis.getVoices()))
+
+  refreshNeuralVoices = async () => {
+    neural = await neuralVoices()
+    neuralVoiceInstalled = neural.length > 0
+    if (shapeRow) shapeRow.hidden = neural.length === 0
+
+    const first = neural[0]
+    if (first && (!settings.neural || !neural.some((voice) => voice.id === settings.voiceId))) {
+      settings = await window.lectern.settings.set({
+        neural: true,
+        voiceId: first.id,
+        character: null
+      })
+      applySettings()
+    }
+    fill(await voices())
+  }
 }
 
 /* ── Home ────────────────────────────────────────────────────────────── */
@@ -1800,7 +1823,9 @@ function showHome(): void {
       // already drives "recently added" the exact list of removable books.
       onAdd: (files) => void addFiles(files),
       removable: (id) => addedTimes.has(id),
-      onRemove: (id) => void removeBook(id)
+      onRemove: (id) => void removeBook(id),
+      hasNeuralVoice: neuralVoiceInstalled,
+      voiceDownload: voiceDownloadActions(showHome)
     }
   )
 
@@ -2018,8 +2043,28 @@ async function showSettings(): Promise<void> {
         0
       )
       reader.play()
-    }
+    },
+    voiceDownload: voiceDownloadActions(() => void showSettings())
   })
+}
+
+function voiceDownloadActions(afterInstalled: () => void): VoiceDownloadActions {
+  return {
+    start: async (onProgress) => {
+      const stop = window.lectern.voice.onDownloadProgress(onProgress)
+      try {
+        return await window.lectern.voice.download()
+      } finally {
+        stop()
+      }
+    },
+    cancel: () => {
+      void window.lectern.voice.cancelDownload()
+    },
+    installed: () => {
+      void refreshNeuralVoices().then(afterInstalled)
+    }
+  }
 }
 
 /** Push settings into the parts of the application that read them. */

@@ -93,27 +93,43 @@ const index = (books: readonly Book[]): LibraryIndex => ({
   books
 })
 
-function options(onAdd: (files: readonly File[]) => void = vi.fn()): HomeOptions {
+function options(
+  onAdd: (files: readonly File[]) => void = vi.fn(),
+  hasNeuralVoice = true
+): HomeOptions {
   return {
     sort: 'title',
     facts: () => ({ addedAt: 0, readAt: 0 }),
     onSort: vi.fn(),
     onAdd,
     removable: () => false,
-    onRemove: vi.fn()
+    onRemove: vi.fn(),
+    hasNeuralVoice,
+    voiceDownload: {
+      start: vi.fn(),
+      cancel: vi.fn(),
+      installed: vi.fn()
+    }
   }
 }
 
 function render(
   books: readonly Book[],
   onAdd?: (files: readonly File[]) => void,
-  onOpen: (bookId: string) => void = vi.fn()
+  onOpen: (bookId: string) => void = vi.fn(),
+  hasNeuralVoice = true
 ): FakeElement {
   vi.stubGlobal('document', {
     createElement: (tagName: string) => new FakeElement(tagName)
   })
   const container = new FakeElement('main')
-  renderHome(container as unknown as HTMLElement, index(books), () => null, onOpen, options(onAdd))
+  renderHome(
+    container as unknown as HTMLElement,
+    index(books),
+    () => null,
+    onOpen,
+    options(onAdd, hasNeuralVoice)
+  )
   return container
 }
 
@@ -146,6 +162,16 @@ describe('empty library', () => {
 
     expect(findByClass(container, 'empty-library')).toBeNull()
     expect(findByClass(container, 'shelf')).not.toBeNull()
+  })
+
+  it('offers the neural voice download on an empty shelf only when none is installed', () => {
+    const withoutVoice = render([], undefined, vi.fn(), false)
+    const withVoice = render([], undefined, vi.fn(), true)
+
+    expect(findByClass(withoutVoice, 'voice-download-start')?.textContent).toBe(
+      'Download free neural voice'
+    )
+    expect(findByClass(withVoice, 'voice-download-start')).toBeNull()
   })
 
   it('marks a moved file and makes its card the locate action', () => {

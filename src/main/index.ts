@@ -26,6 +26,7 @@ import {
   listVoices,
   speak as speakPiper
 } from './piper'
+import { installDefaultVoice } from './voice-download'
 import { configureSettings, loadSettings, saveSettings } from './settings'
 import { DEFAULT_BOUNDS, loadWindowBounds, rememberWindow, type WindowBounds } from './window-state'
 import { cancelPrepare, prepareChapter } from './prepare'
@@ -53,6 +54,7 @@ import { ASSET_SCHEME, parseAssetUrl } from '@shared/assets'
 import { bookmarkId } from '@shared/progress'
 import type { LibraryIndex } from '@shared/library'
 import type { ReadingPosition } from '@shared/progress'
+import type { VoiceDownloadResponse } from '@shared/voice-download'
 
 /**
  * The renderer is served from `app://` rather than `file://`.
@@ -93,6 +95,7 @@ protocol.registerSchemesAsPrivileged([
 
 let cached: LibraryIndex | null = null
 let libraryRoot = DEFAULT_ROOT
+let activeVoiceDownload: AbortController | null = null
 
 async function library(rescan = false): Promise<LibraryIndex> {
   if (!cached || rescan) {
@@ -322,6 +325,39 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('voice:list', () => listVoices())
   ipcMain.handle('voice:folder', () => join(root(), '.library', 'voices'))
+
+  ipcMain.handle('voice:download', async (event) => {
+    if (activeVoiceDownload) {
+      return { status: 'failed', message: 'A voice download is already in progress.' }
+    }
+
+    const controller = new AbortController()
+    activeVoiceDownload = controller
+    try {
+      return await installDefaultVoice(
+        root(),
+        async (url, signal) => {
+          const response = await net.fetch(url, { signal })
+          if (!response.ok || !response.body) throw new Error(`Download failed (${response.status})`)
+          const length = Number(response.headers.get('content-length'))
+          return {
+            body: responseBody(response.body),
+            contentLength: Number.isSafeInteger(length) && length >= 0 ? length : undefined
+          }
+        },
+        controller.signal,
+        (progress) => {
+          if (!event.sender.isDestroyed()) event.sender.send('voice:download-progress', progress)
+        }
+      )
+    } finally {
+      if (activeVoiceDownload === controller) activeVoiceDownload = null
+    }
+  })
+
+  ipcMain.handle('voice:cancel-download', () => {
+    activeVoiceDownload?.abort()
+  })
 
   /*
     Character voices are reported as a list of names, and as whether the two
@@ -709,6 +745,23 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+function responseBody(stream: ReadableStream<Uint8Array>): VoiceDownloadResponse['body'] {
+  return {
+    async *[Symbol.asyncIterator]() {
+      const reader = stream.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) return
+          if (value) yield value
+        }
+      } finally {
+        reader.releaseLock()
+      }
+    }
+  }
+}
 
 async function captureAndExit(window: BrowserWindow, path: string): Promise<void> {
   const { writeFile } = await import('node:fs/promises')

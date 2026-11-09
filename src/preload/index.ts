@@ -6,6 +6,7 @@ import type { Flag, FlagStore } from '@shared/flags'
 import type { PiperVoice, VoiceShape } from '@shared/voice'
 import type { Settings } from '@shared/settings'
 import type { PrepareProgress } from '@shared/speech-cache'
+import type { VoiceDownloadProgress, VoiceDownloadResult } from '@shared/voice-download'
 
 /**
  * The bridge. SPEC section 10.
@@ -112,6 +113,14 @@ const api = {
   voice: {
     /** Neural voices present on disk. Empty until one is installed. */
     list: (): Promise<PiperVoice[]> => ipcRenderer.invoke('voice:list'),
+    /** Download the built-in free Piper voice. No request happens before this call. */
+    download: (): Promise<VoiceDownloadResult> => ipcRenderer.invoke('voice:download'),
+    cancelDownload: (): Promise<void> => ipcRenderer.invoke('voice:cancel-download'),
+    onDownloadProgress: (listener: (progress: VoiceDownloadProgress) => void): (() => void) => {
+      const handler = (_event: unknown, progress: VoiceDownloadProgress): void => listener(progress)
+      ipcRenderer.on('voice:download-progress', handler)
+      return () => ipcRenderer.removeListener('voice:download-progress', handler)
+    },
     /**
      * Synthesise one utterance. Returns 16-bit PCM for the renderer to play,
      * because the main process has no audio output and the renderer already

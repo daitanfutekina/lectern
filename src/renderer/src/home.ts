@@ -11,6 +11,7 @@ import {
   type SortFacts
 } from '@shared/shelf'
 import type { Book, LibraryIndex } from '@shared/library'
+import { voiceDownloadControl, type VoiceDownloadActions } from './voice-download-view'
 
 /**
  * The shelf. SPEC section 3.
@@ -37,6 +38,8 @@ export interface HomeOptions {
   /** Whether a book can be taken off the shelf -- an added document, and nothing of ours. */
   readonly removable: (id: string) => boolean
   readonly onRemove: (id: string) => void
+  readonly hasNeuralVoice: boolean
+  readonly voiceDownload: VoiceDownloadActions
 }
 
 export function renderHome(
@@ -84,7 +87,7 @@ export function renderHome(
 
   container.append(header)
   if (index.books.length === 0) {
-    container.append(emptyLibrary(options.onAdd))
+    container.append(emptyLibrary(options.onAdd, options))
     return
   }
 
@@ -98,7 +101,7 @@ export function renderHome(
   container.append(grid)
 }
 
-function emptyLibrary(onAdd: (files: readonly File[]) => void): HTMLElement {
+function emptyLibrary(onAdd: (files: readonly File[]) => void, options: HomeOptions): HTMLElement {
   const empty = document.createElement('section')
   empty.className = 'empty-library'
 
@@ -127,6 +130,13 @@ function emptyLibrary(onAdd: (files: readonly File[]) => void): HTMLElement {
   button.addEventListener('click', () => picker.click())
 
   empty.append(mark, heading, message, picker, button)
+  if (!options.hasNeuralVoice) {
+    const voiceMessage = document.createElement('p')
+    voiceMessage.className = 'empty-library-voice-note'
+    voiceMessage.textContent =
+      'System voices work immediately. For more natural speech, install the free offline Lessac voice.'
+    empty.append(voiceMessage, voiceDownloadControl(options.voiceDownload))
+  }
   return empty
 }
 
