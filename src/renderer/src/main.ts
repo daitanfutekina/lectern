@@ -1018,8 +1018,14 @@ async function openEpubChapter(
   container.replaceChildren(host)
   container.scrollTop = 0
 
-  const rendered = await renderEpub(host, html, (href) =>
-    followEpubLink(book, chapter, href)
+  const rendered = await renderEpub(
+    host,
+    html,
+    (href) => followEpubLink(book, chapter, href),
+    (block) => {
+      reader.jumpTo(reader.indexNear(block))
+      reader.play()
+    }
   )
   if (!rendered) {
     console.warn('epub: frame did not render')

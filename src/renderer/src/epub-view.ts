@@ -1,3 +1,5 @@
+import { epubReadBlock } from '@shared/epub-click'
+
 /**
  * Showing an EPUB with its own typography. SPEC section 3, as amended.
  *
@@ -15,6 +17,27 @@
 export interface EpubFrame {
   readonly frame: HTMLIFrameElement
   readonly body: HTMLElement
+}
+
+type EpubReadHandler = (block: HTMLElement) => void
+
+/**
+ * Listen inside the frame, because DOM events do not cross its document boundary.
+ *
+ * The target is deliberately duck-typed. An EPUB element belongs to the frame's
+ * realm, so checking it against the application's Element or HTMLElement would
+ * reject every valid double-click.
+ */
+export function listenForEpubRead(doc: Document, onReadFrom: EpubReadHandler): void {
+  doc.addEventListener('dblclick', (event) => {
+    const block = epubReadBlock(event.target)
+    if (!block) return
+
+    // A double-click selects a word by default; reading from it is the gesture,
+    // so leave ordinary drag selection untouched and clear only this selection.
+    doc.getSelection()?.removeAllRanges()
+    onReadFrom(block as HTMLElement)
+  })
 }
 
 /**
@@ -50,7 +73,8 @@ const HOST_SHEET = `
 export function renderEpub(
   container: HTMLElement,
   html: string,
-  onLink?: (href: string) => void
+  onLink?: (href: string) => void,
+  onReadFrom?: EpubReadHandler
 ): Promise<EpubFrame | null> {
   return new Promise((resolve) => {
     container.replaceChildren()
@@ -112,6 +136,8 @@ export function renderEpub(
           onLink(href)
         })
       }
+
+      if (onReadFrom) listenForEpubRead(doc, onReadFrom)
 
       fitToContent(frame, doc.body)
       resolve({ frame, body: doc.body })
