@@ -107,10 +107,21 @@ function mathAsText() {
       // The LaTeX is carried on the wrapper as well as inside it. MathJax
       // replaces the delimiters with its own element tree when it typesets and
       // the source is then unrecoverable -- but generating speech needs it.
-      const attr = value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+      //
+      // This string becomes an `html` node, which `rehypeRaw` parses as markup,
+      // so the LaTeX must be escaped in the body as well as in the attribute: a
+      // bare `<` in `$0<a/c<\infty$` opened an <a> element that swallowed the
+      // rest of the chapter. Both places get the same escape, `&` first so the
+      // entities it adds are not themselves re-encoded; the parser decodes each
+      // back to the exact source, which is what MathJax and speech then read.
+      const escaped = value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+      const attr = escaped.replace(/"/g, '&quot;')
       node['value'] = display
-        ? `<div class="math-display" data-latex="${attr}">\\[${value}\\]</div>`
-        : `<span class="math-inline" data-latex="${attr}">\\(${value}\\)</span>`
+        ? `<div class="math-display" data-latex="${attr}">\\[${escaped}\\]</div>`
+        : `<span class="math-inline" data-latex="${attr}">\\(${escaped}\\)</span>`
     })
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parseFragment } from 'parse5'
 import { renderMarkdown } from './markdown'
 
 describe('renderMarkdown', () => {
@@ -121,4 +122,64 @@ describe('renderMarkdown, figure captions', () => {
     const html = renderMarkdown('<div class="note">Costs $x$ dollars</div>')
     expect(html).not.toContain('math-inline')
   })
+})
+
+/*
+  Maths becomes an `html` node, and rehypeRaw then parses it as HTML. A `<` in
+  the LaTeX therefore opened a tag: `$0<a/c<\infty$` produced a real <a>
+  element that swallowed the rest of the chapter. These parse the output the way
+  a browser would, so they fail on the defect itself and not on its spelling.
+*/
+describe('renderMarkdown, maths containing HTML-significant characters', () => {
+  type P5 = { nodeName: string; value?: string; attrs?: { name: string; value: string }[]; childNodes?: P5[] }
+
+  const parse = (html: string): P5 => parseFragment(html) as unknown as P5
+  const walk = (n: P5, fn: (n: P5, inAnchor: boolean) => void, inAnchor = false): void => {
+    fn(n, inAnchor)
+    const anchor = inAnchor || n.nodeName === 'a'
+    for (const c of n.childNodes ?? []) walk(c, fn, anchor)
+  }
+  const text = (n: P5): string =>
+    n.nodeName === '#text' ? (n.value ?? '') : (n.childNodes ?? []).map(text).join('')
+  const latexOf = (n: P5): string => n.attrs?.find((a) => a.name === 'data-latex')?.value ?? ''
+
+  // [name, markdown, expected LaTeX after HTML parsing, display?]
+  const cases: [string, string, string, boolean][] = [
+    ['inline a/c', String.raw`$0<a/c<\infty$`, String.raw`0<a/c<\infty`, false],
+    ['inline b', '$b<a<2b$', 'b<a<2b', false],
+    ['inline greater-than', '$x>y$', 'x>y', false],
+    ['display', '$$\nb<a<2b\n$$', 'b<a<2b', true],
+    ['display a/c', '$$\n' + String.raw`0<a/c<\infty` + '\n$$', String.raw`0<a/c<\infty`, true],
+    [
+      'matrix ampersand',
+      '$$\n' + String.raw`\begin{bmatrix}a & b \\ c & d\end{bmatrix}` + '\n$$',
+      String.raw`\begin{bmatrix}a & b \\ c & d\end{bmatrix}`,
+      true
+    ],
+    ['entity-like text is not decoded', String.raw`$a &lt; b \& c$`, String.raw`a &lt; b \& c`, false]
+  ]
+
+  for (const [name, md, latex, display] of cases) {
+    it(`keeps the LaTeX intact and opens no element: ${name}`, () => {
+      const root = parse(renderMarkdown(`Before.\n\n${md}\n\nAfter text stays put.`))
+
+      let anchors = 0
+      const maths: P5[] = []
+      walk(root, (n) => {
+        if (n.nodeName === 'a') anchors++
+        if (n.attrs?.some((a) => a.name === 'data-latex')) maths.push(n)
+      })
+      expect(anchors).toBe(0)
+
+      expect(maths).toHaveLength(1)
+      expect(latexOf(maths[0]!)).toBe(latex)
+      expect(text(maths[0]!)).toBe(display ? `\\[${latex}\\]` : `\\(${latex}\\)`)
+
+      let after = false
+      walk(root, (n, inAnchor) => {
+        if (n.nodeName === '#text' && n.value?.includes('After text stays put.')) after = !inAnchor
+      })
+      expect(after).toBe(true)
+    })
+  }
 })
