@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { mapInChunks } from '@shared/scheduling'
 
 /**
  * LaTeX to spoken English, in the main process.
@@ -110,6 +111,7 @@ export function configureMath(macros: Readonly<Record<string, string>>): void {
  * source reads differently in the two positions.
  */
 const cache = new Map<string, string | null>()
+const CHUNK_SIZE = 25
 
 let reportedFailure = false
 
@@ -119,33 +121,40 @@ export async function speakMath(
   const engines = await (ready ??= init({}))
   if (!engines) return items.map(() => null)
 
-  return items.map((item) => {
-    const key = `${item.display ? 'D' : 'I'}:${item.latex}`
-    const hit = cache.get(key)
-    if (hit !== undefined) return hit
+  return mapInChunks(
+    items,
+    CHUNK_SIZE,
+    (item) => {
+      const key = `${item.display ? 'D' : 'I'}:${item.latex}`
+      const hit = cache.get(key)
+      if (hit !== undefined) return hit
 
-    let speech: string | null = null
-    try {
-      const mathml = engines.temml.renderToString(item.latex, {
-        macros: engines.macros,
-        displayMode: item.display,
-        // A malformed equation should produce no speech, not stop the batch.
-        throwOnError: false
-      })
-      const spoken = engines.sre.toSpeech(mathml)
-      speech = spoken && spoken.trim() ? spoken.trim() : null
-    } catch (error) {
-      // One equation failing is not a reason to lose the rest of the chapter,
-      // but the first failure is reported: silence from every equation and
-      // silence from a gate that rejected them all look exactly the same.
-      if (!reportedFailure) {
-        reportedFailure = true
-        process.stderr.write(`math speech failed on ${item.latex.slice(0, 60)}: ${String(error)}\n`)
+      let speech: string | null = null
+      try {
+        const mathml = engines.temml.renderToString(item.latex, {
+          macros: engines.macros,
+          displayMode: item.display,
+          // A malformed equation should produce no speech, not stop the batch.
+          throwOnError: false
+        })
+        const spoken = engines.sre.toSpeech(mathml)
+        speech = spoken && spoken.trim() ? spoken.trim() : null
+      } catch (error) {
+        // One equation failing is not a reason to lose the rest of the chapter,
+        // but the first failure is reported: silence from every equation and
+        // silence from a gate that rejected them all look exactly the same.
+        if (!reportedFailure) {
+          reportedFailure = true
+          process.stderr.write(
+            `math speech failed on ${item.latex.slice(0, 60)}: ${String(error)}\n`
+          )
+        }
+        speech = null
       }
-      speech = null
-    }
 
-    cache.set(key, speech)
-    return speech
-  })
+      cache.set(key, speech)
+      return speech
+    },
+    () => new Promise<void>((resolve) => setImmediate(resolve))
+  )
 }

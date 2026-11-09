@@ -131,6 +131,12 @@ export function isFinished(progress: ChapterProgress | null): boolean {
   return progress !== null && progress.blocks > 0 && progress.furthest >= progress.blocks - 1
 }
 
+/** The progress values a sidebar redraw can actually make visible. */
+export function sidebarProgressKey(progress: ChapterProgress | null, section: number): string {
+  const percent = progress ? Math.round(fractionAt(progress) * 100) : 'new'
+  return [percent, isFinished(progress), section].join(':')
+}
+
 /**
  * Advance a chapter's progress. `furthest` only ever grows: scrolling back to
  * re-read something must not make the book look less read than it is.

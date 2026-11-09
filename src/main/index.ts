@@ -765,6 +765,23 @@ void app.whenReady().then(async () => {
     }
   )
 
+  ipcMain.on(
+    'progress:record-now',
+    (event, bookId: unknown, file: unknown, position: unknown, blocks: unknown) => {
+      if (typeof bookId !== 'string' || typeof file !== 'string') {
+        event.returnValue = null
+        return
+      }
+      if (typeof blocks !== 'number' || !isPosition(position)) {
+        event.returnValue = null
+        return
+      }
+      // Chapter changes and shutdown cannot wait for an invoke that may outlive
+      // the renderer. The disk write remains debounced and is flushed on quit.
+      event.returnValue = recordPosition(bookId, file, position, blocks)
+    }
+  )
+
   ipcMain.handle('progress:open', (_event, bookId: unknown, file: unknown) => {
     if (typeof bookId !== 'string' || typeof file !== 'string') return null
     recordOpen(bookId, file)
@@ -1245,7 +1262,7 @@ app.on('window-all-closed', () => {
  * reading is the most ordinary way to leave, and it is exactly the case where
  * an unflushed position would be lost.
  */
-app.on('before-quit', (event) => {
+app.on('will-quit', (event) => {
   if (flushed) return
   event.preventDefault()
   void flushProgress().then(() => {

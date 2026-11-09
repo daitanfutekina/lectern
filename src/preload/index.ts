@@ -81,6 +81,14 @@ const api = {
       blocks: number
     ): Promise<ChapterProgress | null> =>
       ipcRenderer.invoke('progress:record', bookId, file, position, blocks),
+    /** Store the final position before a chapter or renderer goes away. */
+    recordNow: (
+      bookId: string,
+      file: string,
+      position: ReadingPosition,
+      blocks: number
+    ): ChapterProgress | null =>
+      ipcRenderer.sendSync('progress:record-now', bookId, file, position, blocks),
     /** Note which chapter is open, without disturbing its stored position. */
     open: (bookId: string, file: string): Promise<LibraryProgress | null> =>
       ipcRenderer.invoke('progress:open', bookId, file)

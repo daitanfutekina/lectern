@@ -11,13 +11,14 @@ import {
   fractionAt,
   fractionRead,
   isFinished,
+  sidebarProgressKey,
   type Bookmark,
   type LibraryProgress,
   type ReadingPosition
 } from '@shared/progress'
 import type { Book, Chapter, LibraryIndex } from '@shared/library'
 import { typeset, configureMacros } from './mathjax'
-import { blockCount, currentPosition, restorePosition, trackPosition } from './position'
+import { currentPosition, restorePosition, trackPosition } from './position'
 import {
   collectMath,
   extract,
@@ -116,6 +117,7 @@ const pdfPages = new Map<number, HTMLElement>()
 
 /** One reader for the whole session; chapters are loaded into it. */
 const reader = new Reader()
+let positionTracker: ReturnType<typeof trackPosition> | null = null
 
 const el = <T extends HTMLElement>(id: string): T | null => document.querySelector<T>(`#${id}`)
 
@@ -154,28 +156,43 @@ function positionBody(): HTMLElement | null {
   )
 }
 
-/** Hand a position to the main process and fold the answer back into the index. */
+function applyRecorded(
+  bookId: string,
+  file: string,
+  updated: NonNullable<ReturnType<typeof window.lectern.progress.recordNow>>,
+  refreshSidebar: boolean
+): void {
+  const stored = bookProgress(bookId)
+  progress = {
+    ...progress,
+    lastBook: bookId,
+    books: {
+      ...progress.books,
+      [bookId]: {
+        ...stored,
+        lastChapter: file,
+        chapters: { ...stored.chapters, [file]: updated }
+      }
+    }
+  }
+  if (refreshSidebar && sidebarFingerprint() !== renderedSidebarFingerprint) renderSidebar()
+}
+
+/** Hand a coalesced position to the main process and fold the answer back in. */
 function record(position: ReadingPosition, blocks: number): void {
   if (!current || restoring) return
   const { bookId, file } = current
 
   void window.lectern.progress.record(bookId, file, position, blocks).then((updated) => {
-    if (!updated) return
-    const stored = bookProgress(bookId)
-    progress = {
-      ...progress,
-      lastBook: bookId,
-      books: {
-        ...progress.books,
-        [bookId]: {
-          ...stored,
-          lastChapter: file,
-          chapters: { ...stored.chapters, [file]: updated }
-        }
-      }
-    }
-    renderSidebar()
+    if (updated) applyRecorded(bookId, file, updated, true)
   })
+}
+
+function recordNow(position: ReadingPosition, blocks: number): void {
+  if (!current || restoring) return
+  const { bookId, file } = current
+  const updated = window.lectern.progress.recordNow(bookId, file, position, blocks)
+  if (updated) applyRecorded(bookId, file, updated, false)
 }
 
 /**
@@ -188,10 +205,7 @@ function record(position: ReadingPosition, blocks: number): void {
  * through rather than where they stopped.
  */
 function recordHere(): void {
-  const container = el<HTMLElement>('content')
-  const body = positionBody()
-  if (!container || !body) return
-  record(currentPosition(container, body), blockCount(body))
+  positionTracker?.flush()
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
@@ -210,6 +224,7 @@ function recordHere(): void {
  * the default already gets right at every launch.
  */
 const partsFolded = new Set<string>()
+let renderedSidebarFingerprint = ''
 
 const partIsOpen = (title: string, holdsCurrent: boolean): boolean =>
   partsFolded.has(title) ? !holdsCurrent : holdsCurrent
@@ -343,6 +358,7 @@ function renderSidebar(): void {
   }
 
   renderBookmarks()
+  renderedSidebarFingerprint = sidebarFingerprint()
 }
 
 /**
@@ -498,6 +514,19 @@ function sectionEntries(
   }
 }
 
+/** Values a scroll can visibly change in the existing sidebar. */
+function sidebarFingerprint(): string {
+  if (!current) return 'home'
+
+  const book = findBook(index, current.bookId)
+  const chapter = book?.chapters.find((entry) => entry.file === current?.file) ?? null
+  const stored = bookProgress(current.bookId).chapters[current.file] ?? null
+  const section =
+    sectionsOpen && book && chapter ? (sectionEntries(book, chapter)?.here ?? -1) : -1
+
+  return [current.bookId, current.file, sidebarProgressKey(stored, section)].join('\u0000')
+}
+
 function appendSections(into: HTMLElement, book: Book, chapter: Chapter): void {
   const entries = sectionEntries(book, chapter)
   if (!entries) return
@@ -648,6 +677,9 @@ function headingAbove(body: HTMLElement, position: ReadingPosition): string | nu
 /* ── Reading ─────────────────────────────────────────────────────────── */
 
 async function open(bookId: string, file: string, at?: ReadingPosition): Promise<void> {
+  // Flush before `current` changes, while the old chapter's geometry and id
+  // still agree. The synchronous bridge makes an immediate quit safe too.
+  recordHere()
   // Two chapters recognising at once would fight over one CPU and both crawl.
   cancelScan()
   if (pdfBookId !== bookId) {
@@ -1994,6 +2026,7 @@ async function showSettings(): Promise<void> {
   const container = el<HTMLElement>('content')
   if (!container) return
 
+  recordHere()
   cancelScan()
   reader.stop()
   current = null
@@ -2335,7 +2368,7 @@ async function start(): Promise<void> {
   })
 
   if (container) {
-    trackPosition(container, positionBody, record)
+    positionTracker = trackPosition(container, positionBody, record, recordNow)
   }
 
   // The last word before the window goes. The main process debounces writes and

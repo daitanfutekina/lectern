@@ -9,6 +9,7 @@ import {
   isFinished,
   parseProgress,
   positionAt,
+  sidebarProgressKey,
   scrollTopFor
 } from './progress'
 
@@ -126,6 +127,24 @@ describe('isFinished', () => {
     expect(isFinished(advance(null, { block: 3, within: 0 }, 4, 0))).toBe(true)
     expect(isFinished(advance(null, { block: 2, within: 0 }, 4, 0))).toBe(false)
     expect(isFinished(null)).toBe(false)
+  })
+})
+
+describe('sidebarProgressKey', () => {
+  it('stays stable while no displayed value changes', () => {
+    const before = advance(null, { block: 20, within: 0.1 }, 101, 0)
+    const after = advance(before, { block: 20, within: 0.4 }, 101, 1)
+    expect(sidebarProgressKey(after, 2)).toBe(sidebarProgressKey(before, 2))
+  })
+
+  it('changes with rounded progress, completion, or the active section', () => {
+    const before = advance(null, { block: 20, within: 0.4 }, 101, 0)
+    const nextPercent = advance(before, { block: 20, within: 0.6 }, 101, 1)
+    const finished = advance(nextPercent, { block: 100, within: 0 }, 101, 2)
+
+    expect(sidebarProgressKey(nextPercent, 2)).not.toBe(sidebarProgressKey(before, 2))
+    expect(sidebarProgressKey(finished, 2)).not.toBe(sidebarProgressKey(nextPercent, 2))
+    expect(sidebarProgressKey(before, 3)).not.toBe(sidebarProgressKey(before, 2))
   })
 })
 

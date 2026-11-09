@@ -1,4 +1,5 @@
 import { positionAt, scrollTopFor, type ReadingPosition } from '@shared/progress'
+import { coalesceAction } from '@shared/scheduling'
 
 /**
  * The DOM half of reading position. The arithmetic lives in `@shared/progress`
@@ -71,28 +72,38 @@ export function restorePosition(
 /**
  * Report the reading position as it changes.
  *
- * Scroll fires far more often than a frame, so measurement is deferred to the
- * next animation frame and coalesced -- reading block geometry on every scroll
- * event would force a layout on each one.
+ * Geometry and IPC are deliberately limited to four reports a second. A final
+ * synchronous measurement is made separately when the chapter or window goes
+ * away, so this delay cannot lose the reader's last position.
  */
 export function trackPosition(
   container: HTMLElement,
   getBody: () => HTMLElement | null,
-  report: (position: ReadingPosition, blocks: number) => void
-): () => void {
-  let queued = false
+  report: (position: ReadingPosition, blocks: number) => void,
+  reportNow: (position: ReadingPosition, blocks: number) => void = report
+): { flush: () => void; stop: () => void } {
+  let flushing = false
+  const reporter = coalesceAction(() => {
+    const body = getBody()
+    if (!body) return
+    ;(flushing ? reportNow : report)(currentPosition(container, body), blockCount(body))
+  }, 250)
 
   const onScroll = (): void => {
-    if (queued) return
-    queued = true
-    requestAnimationFrame(() => {
-      queued = false
-      const body = getBody()
-      if (!body) return
-      report(currentPosition(container, body), blockCount(body))
-    })
+    reporter.request()
   }
 
   container.addEventListener('scroll', onScroll, { passive: true })
-  return () => container.removeEventListener('scroll', onScroll)
+  return {
+    flush: () => {
+      flushing = true
+      reporter.request()
+      reporter.flush()
+      flushing = false
+    },
+    stop: () => {
+      reporter.cancel()
+      container.removeEventListener('scroll', onScroll)
+    }
+  }
 }
