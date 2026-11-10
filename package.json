@@ -1,10 +1,10 @@
 {
   "name": "lectern",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "A reading application for a personal library, built around reading aloud",
   "author": "Liam Grant",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "convert": "node scripts/html-to-markdown.mjs",
     "dev": "electron-vite dev",
@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@tesseract.js-data/eng": "^1.0.0",
+    "electron-updater": "^6.8.11",
     "fflate": "^0.8.3",
     "mathjax": "^3.2.2",
     "onnxruntime-node": "^1.29.0",
