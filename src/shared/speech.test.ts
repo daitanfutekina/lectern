@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampRate,
+  estimateRemainingSeconds,
   estimateSeconds,
   sentenceSpans,
   sentences,
@@ -96,6 +97,17 @@ describe('estimateSeconds', () => {
     const text = Array.from({ length: 180 }, () => 'word').join(' ')
     expect(estimateSeconds(text, 1)).toBeCloseTo(60)
     expect(estimateSeconds(text, 2)).toBeCloseTo(30)
+  })
+})
+
+describe('estimateRemainingSeconds', () => {
+  it('counts the current and later utterances at the playback rate', () => {
+    const minute = Array.from({ length: 180 }, () => 'word').join(' ')
+    expect(estimateRemainingSeconds([minute, minute, minute], 1, 2)).toBeCloseTo(60)
+  })
+
+  it('reports no time after the queue is complete', () => {
+    expect(estimateRemainingSeconds(['one sentence'], 1, 1)).toBe(0)
   })
 })
 

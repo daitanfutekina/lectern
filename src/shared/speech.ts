@@ -216,6 +216,18 @@ export function estimateSeconds(text: string, rate: number): number {
   return (words / 180) * 60 / (rate > 0 ? rate : 1)
 }
 
+/** Estimated time from the current utterance to the end of the queue. */
+export function estimateRemainingSeconds(
+  utterances: readonly string[],
+  current: number,
+  rate: number
+): number {
+  const start = Math.max(0, Math.min(Math.trunc(current), utterances.length))
+  return utterances
+    .slice(start)
+    .reduce((total, text) => total + estimateSeconds(text, rate), 0)
+}
+
 /** Playback speed the engine will actually honour. */
 export function clampRate(rate: number): number {
   if (!Number.isFinite(rate)) return 1

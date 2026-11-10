@@ -911,8 +911,10 @@ async function fillMathSpeech(
   // Re-extracted rather than patched: the paragraphs now contain text they did
   // not before, so their sentences, offsets and word-follow map all change.
   const resumeAt = reader.state.index
+  const wasPlaying = reader.state.playing
   const rebuilt = withMathSpeech(extract(body), displaySpeech)
   reader.load(rebuilt, Math.min(resumeAt, Math.max(0, rebuilt.length - 1)))
+  if (wasPlaying) reader.play()
   // The equations are words now, so what has to be prepared has changed.
   startPreparing()
 }
@@ -1656,6 +1658,30 @@ function startScan(bookId: string, marker: HTMLElement, body: HTMLElement): void
 
 /* ── Player ──────────────────────────────────────────────────────────── */
 
+async function continueIntoNextChapter(): Promise<void> {
+  const from = current
+  if (!from) return
+
+  const book = findBook(index, from.bookId)
+  // A PDF is already one continuous whole-book scroller. Its queue contains
+  // only the virtualized pages currently drawn, not one chapter to advance.
+  if (!book || book.format === 'pdf') return
+
+  const next = nextChapter(book, from.file)
+  if (!next) return
+
+  await open(book.id, next.file, START)
+  const state = reader.state
+  if (
+    current?.bookId === book.id &&
+    current.file === next.file &&
+    state.total > 0 &&
+    !state.finished
+  ) {
+    reader.play()
+  }
+}
+
 function renderPlayerState(): void {
   const state = reader.state
   const play = el<HTMLButtonElement>('play')
@@ -1667,7 +1693,8 @@ function renderPlayerState(): void {
 
   const position = el<HTMLElement>('speech-position')
   if (position) {
-    position.textContent = state.total ? `${state.index + 1} / ${state.total}` : ''
+    const minutes = Math.ceil(state.remainingSeconds / 60)
+    position.textContent = state.total ? `${minutes} min left` : ''
   }
 
   const rateValue = el<HTMLElement>('rate-value')
@@ -1690,6 +1717,7 @@ async function setUpPlayer(): Promise<void> {
   rate?.addEventListener('input', () => reader.setRate(Number(rate.value)))
 
   reader.onChange(renderPlayerState)
+  reader.onEnd(() => void continueIntoNextChapter())
   renderPlayerState()
 
   const select = el<HTMLSelectElement>('voice')

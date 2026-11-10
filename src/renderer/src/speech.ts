@@ -1,4 +1,4 @@
-import { clampRate } from '@shared/speech'
+import { clampRate, estimateRemainingSeconds } from '@shared/speech'
 import {
   BOOK_VOICE,
   speak as speakNeural,
@@ -31,9 +31,12 @@ export interface SpeechState {
   readonly voice: string | null
   /** True when a neural voice is speaking rather than a system one. */
   readonly neural: boolean
+  readonly finished: boolean
+  readonly remainingSeconds: number
 }
 
 type Listener = (state: SpeechState) => void
+type EndListener = () => void
 
 /** The highlight registry is recent; a browser without it simply shows no follow. */
 const HIGHLIGHTS: { set?: (name: string, highlight: unknown) => void; delete?: (name: string) => void } =
@@ -45,9 +48,11 @@ export class Reader {
   private queue: Utterance[] = []
   private at = 0
   private playing = false
+  private finished = false
   private rate = 1
   private voiceName: string | null = null
   private listeners = new Set<Listener>()
+  private endListeners = new Set<EndListener>()
 
   /**
    * A neural voice, when one is chosen. Held separately from `voiceName`
@@ -95,6 +100,7 @@ export class Reader {
     this.stop()
     this.queue = utterances
     this.at = Math.max(0, Math.min(startAt, Math.max(0, utterances.length - 1)))
+    this.finished = false
     this.prime()
     this.emit()
   }
@@ -115,6 +121,12 @@ export class Reader {
     return () => this.listeners.delete(listener)
   }
 
+  /** Natural queue completion, never pause, cancellation, or replacement. */
+  onEnd(listener: EndListener): () => void {
+    this.endListeners.add(listener)
+    return () => this.endListeners.delete(listener)
+  }
+
   get state(): SpeechState {
     return {
       playing: this.playing,
@@ -122,7 +134,15 @@ export class Reader {
       total: this.queue.length,
       rate: this.rate,
       voice: this.neuralVoice ?? this.voiceName,
-      neural: this.neuralVoice !== null
+      neural: this.neuralVoice !== null,
+      finished: this.finished,
+      remainingSeconds: this.finished
+        ? 0
+        : estimateRemainingSeconds(
+            this.queue.map((utterance) => utterance.text),
+            this.at,
+            this.rate
+          )
     }
   }
 
@@ -192,6 +212,10 @@ export class Reader {
 
   play(): void {
     if (this.queue.length === 0 || this.playing) return
+    if (this.finished) {
+      this.at = 0
+      this.finished = false
+    }
     this.playing = true
     this.speakCurrent()
     this.emit()
@@ -237,6 +261,7 @@ export class Reader {
     const wasPlaying = this.playing
     this.cancel()
     this.at = target
+    this.finished = false
 
     if (wasPlaying) {
       this.speakCurrent()
@@ -338,8 +363,10 @@ export class Reader {
       if (!this.playing) return
       if (this.at + 1 >= this.queue.length) {
         this.playing = false
+        this.finished = true
         this.clearHighlight()
         this.emit()
+        this.emitEnd()
         return
       }
       this.at += 1
@@ -410,8 +437,10 @@ export class Reader {
     this.playing_ = null
     if (this.at + 1 >= this.queue.length) {
       this.playing = false
+      this.finished = true
       this.clearHighlight()
       this.emit()
+      this.emitEnd()
       return
     }
     this.at += 1
@@ -545,6 +574,10 @@ export class Reader {
   private emit(): void {
     const state = this.state
     for (const listener of this.listeners) listener(state)
+  }
+
+  private emitEnd(): void {
+    for (const listener of this.endListeners) listener()
   }
 }
 
