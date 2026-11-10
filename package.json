@@ -14,7 +14,7 @@
     "icons": "node scripts/make-icons.mjs",
     "package": "npm run build && npm run check-package-files && npm run stage-node && electron-builder --win",
     "package:dir": "npm run build && npm run check-package-files && npm run stage-node && electron-builder --win --dir",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config scripts/vitest.renderer.config.ts",
     "check-books": "node scripts/check-library.mjs",
     "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp",
     "stage-node": "node scripts/stage-node.mjs",
@@ -53,5 +53,8 @@
     "unist-util-visit": "^5.1.0",
     "yaml": "^2.9.0"
   },
-  "main": "./out/main/index.js"
+  "main": "./out/main/index.js",
+  "overrides": {
+    "katex": "^0.19.1"
+  }
 }
