@@ -40,6 +40,10 @@ import { promptForPdfPassword } from './pdf-password-view'
 import { clearResult, locate, showResult } from './find-view'
 import { PER_CHAPTER, findMatches, htmlPlain, markdownPlain, queryPattern, type Match } from '@shared/find'
 import { renderEpub } from './epub-view'
+import {
+  documentAddFailureMessage,
+  type DocumentAddFailure
+} from '@shared/added-document'
 import { chapterFragment } from './chapter-assets'
 import type { VoiceDownloadActions } from './voice-download-view'
 import { resolveHref, splitHref } from '@shared/epub'
@@ -1026,6 +1030,7 @@ async function openEpubChapter(
     host,
     html,
     settings.theme,
+    settings.fontScale,
     (href) => followEpubLink(book, chapter, href),
     (block) => {
       reader.jumpTo(reader.indexNear(block))
@@ -2075,13 +2080,18 @@ async function addFiles(files: readonly File[]): Promise<void> {
     await load(true)
     showHome()
   }
-  if (result.rejected.length > 0) {
-    // Said plainly rather than ignored: a file that vanishes while being
-    // chosen looks like the application is broken.
-    announce(`${result.rejected.length} file(s) skipped — only PDF and EPUB can be added.`)
+  if (result.failures.length > 0) {
+    presentAddFailures(result.failures)
   } else if (result.added === 0) {
     announce('Already in the library.')
   }
+}
+
+/** The one presentation seam T16's shared notice component will replace. */
+function presentAddFailures(failures: readonly DocumentAddFailure[]): void {
+  const message = `Could not add: ${documentAddFailureMessage(failures)}`
+  if (document.querySelector('.shelf-hint')) announce(message)
+  else window.alert(message)
 }
 
 /** Ask for a moved file's new path, then repaint it under the same progress id. */

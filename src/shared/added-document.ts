@@ -13,6 +13,18 @@ export interface AddedDocument {
 
 export type DocumentFailure = 'absent' | 'failed-to-open'
 
+export type DocumentAddFailureReason = 'unsupported' | 'protected' | 'corrupt' | 'unreadable'
+
+export interface DocumentAddFailure {
+  readonly path: string
+  readonly reason: DocumentAddFailureReason
+}
+
+export interface DocumentAddResult {
+  readonly added: number
+  readonly failures: readonly DocumentAddFailure[]
+}
+
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path
 }
@@ -22,6 +34,40 @@ export function documentFormat(path: string): AddedDocumentFormat | null {
   if (lower.endsWith('.pdf')) return 'pdf'
   if (lower.endsWith('.epub')) return 'epub'
   return null
+}
+
+/** Classify an import failure without exposing an implementation error to the reader. */
+export function classifyDocumentAddFailure(
+  path: string,
+  error?: unknown
+): DocumentAddFailureReason {
+  if (!documentFormat(path)) return 'unsupported'
+
+  const detail = error && typeof error === 'object'
+    ? error as { readonly name?: unknown; readonly code?: unknown }
+    : {}
+  if (detail.name === 'DrmProtectedError' || detail.name === 'PasswordException') return 'protected'
+  if (typeof detail.code === 'string') return 'unreadable'
+  return 'corrupt'
+}
+
+/** One compact message for a batch, so T16 can replace its presentation in one place. */
+export function documentAddFailureMessage(failures: readonly DocumentAddFailure[]): string {
+  const description: Record<Exclude<DocumentAddFailureReason, 'protected'>, string> = {
+    unsupported: 'not supported (add a PDF or EPUB)',
+    corrupt: 'corrupt or not a valid document',
+    unreadable: 'could not be read'
+  }
+  return failures
+    .map((failure) => {
+      const why = failure.reason === 'protected'
+        ? documentFormat(failure.path) === 'epub'
+          ? 'DRM-protected and cannot be opened'
+          : 'password-protected and no password was provided'
+        : description[failure.reason]
+      return `${fileName(failure.path)} — ${why}`
+    })
+    .join('; ')
 }
 
 /** New entries keep this id when their path changes, because progress is keyed by it. */

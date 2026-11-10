@@ -23,4 +23,8 @@ describe('theme palettes', () => {
   it('keeps the light EPUB text distinct from its page', () => {
     expect(THEME_PALETTES.light.epubText).not.toBe(THEME_PALETTES.light.epubBackground)
   })
+
+  it('applies the reader text size as a relative EPUB scale', () => {
+    expect(epubHostSheet('dark', 1.25)).toContain('zoom: 1.25')
+  })
 })

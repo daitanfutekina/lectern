@@ -16,8 +16,8 @@ import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } fr
 import { changeLibraryRoot, resolveLibraryRoot } from './library-location'
 import { authoringKitSource, installAuthoringKit } from './authoring-kit'
 import { configureMath, speakMath } from './math-speech'
-import { closePdf, configurePdfPasswordPrompt, pdfBytes, pdfPassword } from './pdf'
-import { closeEpub, epubCover } from './epub'
+import { closePdf, configurePdfPasswordPrompt, openPdf, pdfBytes, pdfPassword } from './pdf'
+import { closeEpub, epubCover, openEpub } from './epub'
 import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
 import { watchLibrary } from './watch'
@@ -30,6 +30,12 @@ import {
   relocateDocument,
   removeDocument
 } from './documents'
+import {
+  classifyDocumentAddFailure,
+  documentFormat,
+  type DocumentAddFailure,
+  type DocumentAddResult
+} from '@shared/added-document'
 import {
   characterDir,
   charactersReady,
@@ -663,13 +669,33 @@ void app.whenReady().then(async () => {
   )
 
   ipcMain.handle('library:add', async (_event, paths: unknown) => {
-    if (!Array.isArray(paths)) return { added: 0, rejected: [] }
+    if (!Array.isArray(paths)) return { added: 0, failures: [] } satisfies DocumentAddResult
     const cleaned = paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
-    const result = await addDocuments(cleaned)
+    const failures: DocumentAddFailure[] = []
+    const valid: string[] = []
+
+    for (const path of cleaned) {
+      const format = documentFormat(path)
+      if (!format) {
+        failures.push({ path, reason: 'unsupported' })
+        continue
+      }
+
+      try {
+        if (format === 'epub') await openEpub(path)
+        else await openPdf(path)
+        valid.push(path)
+      } catch (error) {
+        failures.push({ path, reason: classifyDocumentAddFailure(path, error) })
+      }
+    }
+
+    const result = await addDocuments(valid)
+    for (const path of result.rejected) failures.push({ path, reason: 'unreadable' })
     // The index is derived from what is on the shelf, so adding to the shelf
     // invalidates it.
     if (result.added > 0) cached = null
-    return result
+    return { added: result.added, failures } satisfies DocumentAddResult
   })
 
   ipcMain.handle('library:locate', async (event, bookId: unknown) => {

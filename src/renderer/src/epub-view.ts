@@ -50,6 +50,7 @@ export function renderEpub(
   container: HTMLElement,
   html: string,
   theme: Theme,
+  fontScale: number,
   onLink?: (href: string) => void,
   onReadFrom?: EpubReadHandler
 ): Promise<EpubFrame | null> {
@@ -88,7 +89,7 @@ export function renderEpub(
       const style = doc.createElement('style')
       // Inserted first as well as using zero-specificity selectors: these are
       // absent-style defaults, never a reason to overrule the publisher.
-      style.textContent = epubHostSheet(theme)
+      style.textContent = epubHostSheet(theme, fontScale)
       doc.head?.prepend(style)
 
       /*

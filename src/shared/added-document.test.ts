@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  classifyDocumentAddFailure,
   classifyDocumentFailure,
   createAddedDocument,
+  documentAddFailureMessage,
   missingDocumentBook,
   parseAddedDocuments,
   relocateAddedDocument
@@ -41,5 +43,26 @@ describe('added document classification', () => {
     expect(relocated?.id).toBe('pdf:Signals.pdf')
     expect(relocated?.path).toBe('E:\\Textbooks\\Signals-and-Systems.pdf')
     expect(relocateAddedDocument(entry!, 'E:\\Textbooks\\Signals.epub')).toBeNull()
+  })
+})
+
+describe('document add failures', () => {
+  it('distinguishes unsupported, protected, corrupt, and unreadable files', () => {
+    expect(classifyDocumentAddFailure('notes.txt')).toBe('unsupported')
+    expect(classifyDocumentAddFailure('locked.epub', { name: 'DrmProtectedError' })).toBe('protected')
+    expect(classifyDocumentAddFailure('broken.pdf', new Error('Invalid PDF'))).toBe('corrupt')
+    expect(classifyDocumentAddFailure('missing.pdf', { code: 'ENOENT' })).toBe('unreadable')
+  })
+
+  it('names every failed file in one batch message', () => {
+    expect(documentAddFailureMessage([
+      { path: 'C:\\Books\\notes.txt', reason: 'unsupported' },
+      { path: 'C:\\Books\\locked.epub', reason: 'protected' },
+      { path: 'C:\\Books\\broken.pdf', reason: 'corrupt' }
+    ])).toBe(
+      'notes.txt — not supported (add a PDF or EPUB); ' +
+      'locked.epub — DRM-protected and cannot be opened; ' +
+      'broken.pdf — corrupt or not a valid document'
+    )
   })
 })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bodyOf,
+  hasDrmEncryption,
   navigationOf,
   opfPath,
   parseNavXhtml,
@@ -10,6 +11,43 @@ import {
   splitHref,
   titleFromDocument
 } from './epub'
+
+describe('hasDrmEncryption', () => {
+  it('accepts an encryption manifest containing only standard font obfuscation', () => {
+    expect(hasDrmEncryption(`
+      <encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+        xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+        <enc:EncryptedData>
+          <enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+          <enc:CipherData><enc:CipherReference URI="Fonts/Body.otf"/></enc:CipherData>
+        </enc:EncryptedData>
+        <enc:EncryptedData>
+          <enc:EncryptionMethod Algorithm="http://ns.adobe.com/pdf/enc#RC"/>
+          <enc:CipherData><enc:CipherReference URI="Fonts/Display.otf"/></enc:CipherData>
+        </enc:EncryptedData>
+      </encryption>
+    `)).toBe(false)
+  })
+
+  it('rejects encrypted reading content even beside an obfuscated font', () => {
+    expect(hasDrmEncryption(`
+      <encryption xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+        <enc:EncryptedData>
+          <enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+          <enc:CipherData><enc:CipherReference URI="Fonts/Body.otf"/></enc:CipherData>
+        </enc:EncryptedData>
+        <enc:EncryptedData>
+          <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"/>
+          <enc:CipherData><enc:CipherReference URI="Text/chapter.xhtml"/></enc:CipherData>
+        </enc:EncryptedData>
+      </encryption>
+    `)).toBe(true)
+  })
+
+  it('does not treat an empty encryption manifest as DRM', () => {
+    expect(hasDrmEncryption('<encryption/>')).toBe(false)
+  })
+})
 
 const CONTAINER = `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">

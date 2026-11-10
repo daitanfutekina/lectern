@@ -45,6 +45,30 @@ export const EMPTY_EPUB: EpubStructure = {
   ncxId: null
 }
 
+const FONT_OBFUSCATION_ALGORITHMS = new Set([
+  'http://www.idpf.org/2008/embedding',
+  'http://ns.adobe.com/pdf/enc#RC'
+])
+
+/**
+ * Whether an EPUB encryption manifest describes protected content.
+ *
+ * EPUB uses the same manifest for DRM and for reversible font obfuscation.
+ * The latter does not protect the book's text and must not make the reader
+ * reject an otherwise readable EPUB.
+ */
+export function hasDrmEncryption(encryptionXml: string): boolean {
+  const entries = encryptionXml.match(
+    /<(?:[A-Za-z_][\w.-]*:)?EncryptedData\b[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?EncryptedData\s*>/gi
+  ) ?? []
+
+  return entries.some((entry) => {
+    const method = /<(?:[A-Za-z_][\w.-]*:)?EncryptionMethod\b[^>]*\bAlgorithm\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(entry)
+    const algorithm = method?.[1] ?? method?.[2]
+    return !algorithm || !FONT_OBFUSCATION_ALGORITHMS.has(algorithm)
+  })
+}
+
 const decode = (text: string): string =>
   text
     .replace(/&lt;/g, '<')

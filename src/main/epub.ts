@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import { unzipSync, strFromU8 } from 'fflate'
 import {
   bodyOf,
+  hasDrmEncryption,
   navigationOf,
   opfPath,
   parseOpf,
@@ -42,6 +43,7 @@ export function closeEpub(path: string): void {
 export class DrmProtectedError extends Error {
   constructor() {
     super('This EPUB is DRM-protected and cannot be opened.')
+    this.name = 'DrmProtectedError'
   }
 }
 
@@ -51,9 +53,12 @@ export async function openEpub(path: string): Promise<EpubBook> {
 
   const entries = unzipSync(new Uint8Array(await readFile(path)))
 
-  // DRM is a wall, not a bug. Saying so plainly beats failing later with
-  // something that looks like corruption.
-  if (Object.keys(entries).some((name) => name.endsWith('META-INF/encryption.xml'))) {
+  // The encryption manifest also describes harmless font obfuscation. Only
+  // protected content is a wall; obfuscated fonts leave the text readable.
+  const encryptionName = Object.keys(entries).find(
+    (name) => name.toLowerCase() === 'meta-inf/encryption.xml'
+  )
+  if (encryptionName && hasDrmEncryption(strFromU8(entries[encryptionName]!))) {
     throw new DrmProtectedError()
   }
 

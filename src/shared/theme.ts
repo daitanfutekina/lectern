@@ -33,7 +33,7 @@ export function windowBackground(theme: Theme): string {
  * Host defaults for an EPUB frame, kept at zero selector specificity so any
  * colour chosen by the publisher wins regardless of its selector shape.
  */
-export function epubHostSheet(theme: Theme): string {
+export function epubHostSheet(theme: Theme, fontScale = 1): string {
   const palette = THEME_PALETTES[theme]
   return `
   :where(:root) { color-scheme: ${theme}; }
@@ -42,6 +42,7 @@ export function epubHostSheet(theme: Theme): string {
     color: ${palette.epubText};
   }
   :where(body) {
+    zoom: ${fontScale};
     margin: 0;
     padding: 32px 40px 96px;
     max-width: 46em;

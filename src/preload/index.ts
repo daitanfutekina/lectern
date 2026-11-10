@@ -7,6 +7,7 @@ import type { PiperVoice, VoiceShape } from '@shared/voice'
 import type { Settings } from '@shared/settings'
 import type { PrepareProgress } from '@shared/speech-cache'
 import type { VoiceDownloadProgress, VoiceDownloadResult } from '@shared/voice-download'
+import type { DocumentAddResult } from '@shared/added-document'
 
 /**
  * The bridge. SPEC section 10.
@@ -27,7 +28,7 @@ const api = {
      * Takes paths rather than files because only the main process should be
      * touching the filesystem.
      */
-    add: (paths: readonly string[]): Promise<{ added: number; rejected: string[] }> =>
+    add: (paths: readonly string[]): Promise<DocumentAddResult> =>
       ipcRenderer.invoke('library:add', paths),
     /** Choose the new path for a registered file while keeping its progress id. */
     locate: (
