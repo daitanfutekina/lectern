@@ -32,6 +32,7 @@ export interface SettingsContext {
   readonly onClearStore: (done: () => void) => void
   readonly onReveal: () => void
   readonly onChangeLibrary: () => void
+  readonly onInstallAuthoringKit: (done: (copied: number) => void) => void
   readonly onRescan: () => void
   readonly onExportIndex: (done: () => void) => void
   readonly onPreview: (text: string) => void
@@ -399,6 +400,19 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
   rescan.textContent = 'Rescan library'
   rescan.addEventListener('click', context.onRescan)
 
+  const authoringKit = document.createElement('button')
+  authoringKit.type = 'button'
+  authoringKit.className = 'settings-button'
+  authoringKit.textContent = 'Add writing guide for Claude to this library'
+  authoringKit.addEventListener('click', () => {
+    authoringKit.disabled = true
+    authoringKit.textContent = 'Adding writing guide…'
+    context.onInstallAuthoringKit((copied) => {
+      authoringKit.textContent = copied > 0 ? 'Writing guide added' : 'Writing guide already present'
+      authoringKit.disabled = false
+    })
+  })
+
   const index = document.createElement('button')
   index.type = 'button'
   index.className = 'settings-button'
@@ -419,6 +433,7 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
       row('Location', text(context.libraryRoot)),
       row('', reveal),
       row('', changeLibrary),
+      row('', authoringKit),
       row('', rescan),
       row('', index),
       note('Only the books folder is scanned. PDFs and EPUBs join the library by being dropped on the window, and are read where they live rather than copied.')

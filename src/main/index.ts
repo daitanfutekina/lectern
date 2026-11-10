@@ -14,6 +14,7 @@ import { join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
 import { changeLibraryRoot, resolveLibraryRoot } from './library-location'
+import { authoringKitSource, installAuthoringKit } from './authoring-kit'
 import { configureMath, speakMath } from './math-speech'
 import { closePdf, pdfBytes } from './pdf'
 import { closeEpub, epubCover } from './epub'
@@ -389,6 +390,13 @@ void app.whenReady().then(async () => {
     }
     return changed
   })
+
+  ipcMain.handle('settings:install-authoring-kit', () =>
+    installAuthoringKit(
+      root(),
+      authoringKitSource(app.isPackaged, process.resourcesPath, __dirname)
+    )
+  )
 
   ipcMain.handle('voice:list', () => listVoices())
   ipcMain.handle('voice:folder', () => join(root(), '.library', 'voices'))

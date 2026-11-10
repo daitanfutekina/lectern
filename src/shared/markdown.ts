@@ -23,7 +23,7 @@ import { visit } from 'unist-util-visit'
  * adding a callout type to the textbooks needs no change here -- only a rule in
  * the stylesheet.
  */
-const BOX_DIRECTIVES = new Set([
+export const BOX_DIRECTIVES = new Set([
   'theorem', 'definition', 'lemma', 'corollary', 'proof',
   'example', 'answer', 'problem', 'solution', 'summary',
   'callout-key', 'callout-intuition', 'callout-warning',

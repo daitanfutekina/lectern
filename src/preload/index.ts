@@ -115,7 +115,10 @@ const api = {
     /** Open the library folder in the file manager. */
     reveal: (): Promise<void> => ipcRenderer.invoke('settings:reveal'),
     /** Choose a different library folder; the app restarts after a change. */
-    changeLibrary: (): Promise<boolean> => ipcRenderer.invoke('settings:change-library')
+    changeLibrary: (): Promise<boolean> => ipcRenderer.invoke('settings:change-library'),
+    /** Add the bundled chapter-writing guide without replacing customised files. */
+    installAuthoringKit: (): Promise<{ copied: number; existing: number }> =>
+      ipcRenderer.invoke('settings:install-authoring-kit')
   },
 
   voice: {

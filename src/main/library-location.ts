@@ -1,7 +1,8 @@
-import { dialog, type BrowserWindow, type OpenDialogOptions } from 'electron'
+import { app, dialog, type BrowserWindow, type OpenDialogOptions } from 'electron'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { decideLibraryRoot } from '@shared/library-root'
+import { authoringKitSource, installAuthoringKit } from './authoring-kit'
 import { DEFAULT_ROOT } from './library'
 
 const LOCATION_FILE = 'library-root.txt'
@@ -25,6 +26,17 @@ async function storedRoot(userData: string): Promise<string | null> {
 
 async function prepareRoot(path: string): Promise<void> {
   await Promise.all(LIBRARY_FOLDERS.map((folder) => mkdir(join(path, folder), { recursive: true })))
+}
+
+async function preparePickedRoot(path: string): Promise<void> {
+  const isNew = !(await isDirectory(join(path, '.library')))
+  await prepareRoot(path)
+  if (isNew) {
+    await installAuthoringKit(
+      path,
+      authoringKitSource(app.isPackaged, process.resourcesPath, __dirname)
+    )
+  }
 }
 
 async function rememberRoot(userData: string, path: string): Promise<void> {
@@ -62,7 +74,7 @@ export async function resolveLibraryRoot(userData: string): Promise<string | nul
 
   const picked = await pickRoot()
   if (!picked) return null
-  await prepareRoot(picked)
+  await preparePickedRoot(picked)
   await rememberRoot(userData, picked)
   return picked
 }
@@ -75,7 +87,7 @@ export async function changeLibraryRoot(
 ): Promise<boolean> {
   const picked = await pickRoot(owner)
   if (!picked) return false
-  await prepareRoot(picked)
+  await preparePickedRoot(picked)
   await rememberRoot(userData, picked)
   return picked !== current
 }

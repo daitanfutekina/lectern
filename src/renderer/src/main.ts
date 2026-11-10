@@ -2164,6 +2164,9 @@ async function showSettings(): Promise<void> {
     },
     onReveal: () => void window.lectern.settings.reveal(),
     onChangeLibrary: () => void window.lectern.settings.changeLibrary(),
+    onInstallAuthoringKit: (done) => {
+      void window.lectern.settings.installAuthoringKit().then((result) => done(result.copied))
+    },
     onRescan: () => void load(true).then(showHome),
     onExportIndex: (done) => void window.lectern.flags.exportIndex().then(done),
     onPreview: (text) => {
