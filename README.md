@@ -1,126 +1,135 @@
 # Lectern
 
-A reading application for a personal library of textbooks, PDFs and EPUBs, built
-around reading aloud.
+Lectern is a Windows reading application for a personal library of Markdown
+textbooks, PDFs, and EPUBs. Its focus is reading aloud: every format is adapted
+to the same speech controls, while PDFs still look like PDFs and EPUBs keep the
+publisher's typography.
 
-Everything is free and offline. No paid service, no account, no network.
+Lectern is currently **Windows-only**. The build produces a Windows x64
+installer. Public release hosting, code signing, and automatic updates are not
+set up yet, and the license is not yet decided.
 
-## Roadmap
+## What it does
 
-- [x] **M1** — Library root, scan, index, Markdown renderer
-- [x] **M2** — Reading UI, progress, bookmarks, resume
-- [x] **M3** — Speakable blocks, text-to-speech on Markdown and HTML
-- [x] **M4** — Mathematics speech and the complexity gate
-- [x] **M5** — Digital PDF and EPUB adapters
-- [x] **M6** — OCR pipeline and background queue
-- [x] **M7** — Flagged passages and index export
-- [x] **M8** — PDFs shown as PDFs, EPUBs with the publisher's typography
-- [x] **M9** — Neural voices, character voices, and a settings page
+- Reads Markdown and HTML textbooks, digital PDFs, scanned PDFs through
+  background OCR, and EPUBs.
+- Uses Windows system voices immediately and can install a free Piper neural
+  voice for higher-quality local speech.
+- Remembers reading and speech position, bookmarks, window state, and settings.
+- Searches within the open book, tracks progress on the shelf, and lets larger
+  libraries filter by title or author.
+- Starts reading from a block on double-click and continues automatically into
+  the next chapter for Markdown, HTML, and EPUB books.
+- Shows PDFs as continuous rendered pages, with page navigation, internal and
+  web links, password prompts, and an optional night-reading inversion that is
+  off by default.
+- Preserves EPUB styling while applying the reader's relative text-size setting,
+  and reports content DRM instead of opening unreadable content.
+- Includes dark and light themes, visible keyboard focus, reduced-motion
+  support, and a `?` overlay generated from the active keyboard shortcuts.
+- Flags a passage to `FLAGGED.md` and exports the library structure to
+  `INDEX.md`, so a coding agent can improve a textbook from what the reader
+  actually encountered.
 
-Each was done against the explicit *done when* in
-[docs/SPEC.md](docs/SPEC.md) section 11.
+Speech does **not** continue across PDF chapters. The PDF remains a continuous
+visual scroller, but automatic chapter-to-chapter playback is currently limited
+to the other book formats.
 
-## Reading aloud
+## Install
 
-Speech is the point of the application. The Windows system voices are the
-fallback; the default is Piper, a free local neural voice, and on top of that a
-character voice can convert the result into someone else.
+There is no hosted public installer yet. To build the current Windows installer
+from source, install Node.js and npm, then run these commands from the repository:
 
-Neither kind of voice is in this repository — they are hundreds of megabytes of
-model weights. [docs/VOICES.md](docs/VOICES.md) says what to install and where.
-
-## The shelf
-
-The home view is a grid of covers with a corner ribbon per format. Only
-`books/` is scanned; a PDF or EPUB joins the library by being dropped on the
-window or placed in `pdfs/`/`epubs/` by hand, and it is referenced where it
-lives rather than copied.
-
-A PDF is shown as its rendered pages and an EPUB keeps its own typography. Only
-the hand-written textbooks wear the application's design, which is what stops
-*those* diverging.
-
-## The handoff
-
-Right-click a paragraph while reading to flag it. That writes `FLAGGED.md` at
-the library root -- grouped by chapter, quoting each passage as it read at the
-time, so it can be found by searching the source even after the chapter has
-been edited. Editing a source file re-renders it in the reader within a second,
-which is what makes the loop worth using.
-
-The `Index` button writes `INDEX.md`: every book, chapter and heading in one
-file, so what the library already covers can be read without opening any of it.
-
-## Commands
-
-```bash
-npm run dev        # development, renderer hot reload
-npm run build      # typecheck + build all three bundles to out/
-npm run typecheck  # main/preload and renderer, separately
-npm test           # unit tests for src/shared
-npm run convert    # HTML textbook -> Markdown
-npm run check-books      # every library check that needs no toolchain
-npm run check-books:all  # the above, plus sympy identities and g++ listings
-npm run icons      # re-render the icon from scripts/make-icons.mjs
-npm run package    # installer into release/
-npm run package:dir  # the same layout, unpacked, without building an installer
+```powershell
+npm.cmd ci
+npm.cmd run package
 ```
 
-Packaging notes, because each was found the hard way. The build ships
-**without an asar**: the main process resolves the preload, the renderer
-bundle and the synthesis worker by paths relative to its own `__dirname`,
-and a partial unpack silently splits those apart. It ships **a real
-`node.exe`** beside the application, because the worker cannot run on
-Electron -- V8's sandbox rejects the external buffers the ONNX runtimes
-return, `ELECTRON_RUN_AS_NODE` included. And `files` in
-`electron-builder.yml` is a generated allowlist of what the main process
-actually requires: `npm run check-package-files` recomputes it and fails if
-the file disagrees. Written by hand it missed `pdfjs-dist`, and the packaged
-build then dropped every PDF on the floor without saying so.
+The generated x64 installer is placed in `release/`. Run that `.exe` and follow
+the installation prompts. The installer is not yet code-signed, so Windows may
+show an unrecognized-app warning. Lectern does not yet update itself; install a
+new build manually when one is available.
 
-Verifying a render needs the real application, so:
+## Create a library and add books
 
-```bash
-LECTERN_CAPTURE=shot.png npx electron out/main/index.js
+On first launch, choose a folder for the library. Lectern creates these folders
+inside it:
+
+```text
+<library>/
+  books/        Markdown or HTML textbooks
+  pdfs/
+  epubs/
+  .library/     index, progress, settings, OCR, speech, and voice data
 ```
 
-runs the app, screenshots it, reports what is actually in the DOM, and exits.
-`LECTERN_SCROLL`, `LECTERN_CLICK`, `LECTERN_WAIT` and `LECTERN_WIDTH` drive it
-further, which is how resuming was verified across three window widths. A
-capture run is hidden and muted, so it never takes the screen or reads aloud
-over whoever is using the machine.
+Use **Add PDF or EPUB** on an empty shelf, drop one or more files anywhere on
+the window, or place files in the library's `pdfs/` or `epubs/` folder. Added
+documents stay in their original location rather than being copied. Unsupported,
+protected, corrupt, and unreadable files are reported by name when an add fails.
 
-## The library
+If an added file is moved, its shelf entry and progress remain. Open that entry
+to locate the file again. Right-click an added PDF or EPUB to remove its library
+entry; Lectern never deletes the source file.
 
-Books live at `C:\Library` by default:
+A hand-written textbook belongs in `<library>/books/<book-name>/`. It needs a
+`book.yml` manifest that names the book and lists its chapters in reading order.
 
+## Voices
+
+Windows system voices work without an additional download. For a more natural
+local voice, use the button on the empty shelf or in Settings to install the
+free Lessac Piper voice. The download starts only when that button is clicked,
+shows progress, can be cancelled, verifies the downloaded files, and leaves no
+partial voice installed after a failure. Once installed, speech synthesis is
+local and works offline.
+
+Other Piper or Kokoro voices and optional character-voice models can be
+installed manually. They are not bundled because the model files are large.
+See [docs/VOICES.md](docs/VOICES.md) for the supported folder layout and model
+details.
+
+## Write your own books with Claude
+
+Every newly created library receives a self-contained textbook-writing skill in
+both of these locations:
+
+```text
+<library>/.claude/skills/textbook/
+<library>/.agents/skills/textbook/
 ```
-C:\Library\
-  books\        textbooks (Markdown; HTML during the transition)
-  pdfs\
-  epubs\
-  .library\     index.json, progress.json, ocr-cache\
-```
 
-A book is a folder containing chapter files and one `book.yml` carrying the
-title, chapter order, and the book's LaTeX macros.
+For an existing library, choose **Add writing guide for Claude to this library**
+in Settings. The installer copies only missing files, so it does not overwrite a
+guide you have customized.
 
-Books contain no presentation. One stylesheet ships with the application, which
-is what stops seven books drifting into seven designs.
+Open the library folder in Claude Code and ask it to create or improve a chapter.
+The skill explains the `book.yml` manifest, Markdown front matter, supported
+directives, mathematics, figures, hidden solutions, and writing for speech. It
+also includes an original example chapter and a chapter lint script. New chapters
+must be added to the manifest before they appear in Lectern.
 
-## Converting a textbook
+Lectern watches textbook source files, so a saved edit re-renders in the reader
+without a Markdown build step.
 
-```bash
-npm run convert -- "path/to/html/book" "C:/Library/books/the-book"
-node scripts/verify-conversion.mjs "path/to/html/book" "C:/Library/books/the-book"
-```
+## Privacy and network behavior
 
-The converter does the bulk and reports what it could not handle; the verifier
-compares the result against the source word by word and checks that directive
-nesting closes. Linear Algebra converts at 0.00% word loss.
+Books, progress, settings, OCR results, prepared speech, and installed voices
+stay on the computer. Lectern requires no account or paid service, and ordinary
+reading uses local files and bundled libraries.
+
+Network access is limited to two reading features:
+
+- A chapter may contain a sandboxed remote embed. That embed may need the
+  network, but the chapter text remains local and readable when it cannot load.
+- The free Piper voice is downloaded only after the reader explicitly clicks
+  the install button. Speech is local after installation.
+
+Web links in books and PDFs open in the system browser only when clicked.
 
 ## Documentation
 
-- [docs/SPEC.md](docs/SPEC.md) — the specification, and the reasoning behind it
-- [docs/FINDINGS.md](docs/FINDINGS.md) — experiments and what they showed
-- [CLAUDE.md](CLAUDE.md) — working notes for Claude Code
+- [docs/VOICES.md](docs/VOICES.md) — neural and character voice setup
+- [docs/SPEC.md](docs/SPEC.md) — product constraints and architecture
+- [docs/FINDINGS.md](docs/FINDINGS.md) — experiments behind implementation decisions
+- [resources/authoring/textbook/SKILL.md](resources/authoring/textbook/SKILL.md) — the bundled writing guide
