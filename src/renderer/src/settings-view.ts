@@ -379,6 +379,15 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
 
   /* ── Library ───────────────────────────────────────────────────── */
 
+  page.append(
+    section('Updates', [
+      toggle('Update automatically', context.settings.autoUpdate, (value) =>
+        context.onChange({ autoUpdate: value })
+      ),
+      note('Checks run in the background. Downloaded updates install when Lectern quits.')
+    ])
+  )
+
   const sort = document.createElement('select')
   sort.className = 'settings-select'
   for (const value of SORT_ORDER) sort.append(option(value, SORT_LABELS[value]))

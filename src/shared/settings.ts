@@ -20,6 +20,10 @@ export interface Settings {
   /** Invert rendered PDF pages for night reading. Off keeps the document unchanged. */
   readonly pdfNight: boolean
 
+  /* Application */
+  /** Check for and download releases in the background. */
+  readonly autoUpdate: boolean
+
   /* Speech */
   readonly voiceId: string | null
   readonly neural: boolean
@@ -75,6 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
   measure: 72,
   theme: 'dark',
   pdfNight: false,
+  autoUpdate: true,
   voiceId: null,
   neural: true,
   rate: 1,
@@ -122,6 +127,7 @@ export function parseSettings(source: string): Settings {
     measure: num(raw['measure'], 72, 45, 120),
     theme: raw['theme'] === 'light' ? 'light' : 'dark',
     pdfNight: bool(raw['pdfNight'], false),
+    autoUpdate: bool(raw['autoUpdate'], true),
     voiceId: typeof raw['voiceId'] === 'string' ? raw['voiceId'] : null,
     neural: bool(raw['neural'], true),
     rate: num(raw['rate'], 1, 0.5, 3),

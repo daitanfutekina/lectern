@@ -76,6 +76,7 @@ import type { ReadingPosition } from '@shared/progress'
 import type { VoiceDownloadResponse } from '@shared/voice-download'
 import { formatFatalError, type FatalErrorKind } from '@shared/fatal-error'
 import { shortcutForEvent, type ShortcutId } from '@shared/shortcuts'
+import { scheduleAutoUpdate } from './updater'
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -896,6 +897,7 @@ void app.whenReady().then(async () => {
 
   const [bounds, initialSettings] = await Promise.all([loadWindowBounds(), loadSettings()])
   const window = createWindow(bounds, initialSettings.theme)
+  scheduleAutoUpdate(window, app.isPackaged, initialSettings.autoUpdate, app.getPath('userData'))
 
   // Editing a chapter in Claude Code and seeing it in the reader is the loop
   // M7 exists to close, so the reader is told rather than having to be told.

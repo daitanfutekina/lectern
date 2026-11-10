@@ -42,6 +42,12 @@ describe('parseSettings', () => {
     expect(parseSettings(JSON.stringify({ pdfNight: 'yes' })).pdfNight).toBe(false)
   })
 
+  it('enables automatic updates by default and remembers an opt-out', () => {
+    expect(parseSettings('{}').autoUpdate).toBe(true)
+    expect(parseSettings(JSON.stringify({ autoUpdate: false })).autoUpdate).toBe(false)
+    expect(parseSettings(JSON.stringify({ autoUpdate: 'no' })).autoUpdate).toBe(true)
+  })
+
   /*
     The section list defaults to shown, so `false` is the value with something to
     prove. This is the shape of the shelf-sort bug: a choice that reads back as

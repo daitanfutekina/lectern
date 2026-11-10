@@ -18,7 +18,8 @@
     "check-books": "node scripts/check-library.mjs",
     "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp",
     "stage-node": "node scripts/stage-node.mjs",
-    "check-package-files": "node scripts/runtime-deps.mjs"
+    "check-package-files": "node scripts/runtime-deps.mjs",
+    "notices": "node scripts/generate-notices.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",

@@ -2407,6 +2407,7 @@ async function start(): Promise<void> {
   // Indexing needs the password before a protected PDF can reach the shelf.
   // The bridge returns it to pdf.js in memory and never writes it to settings.
   window.lectern.scan.onPasswordRequest(promptForPdfPassword)
+  window.lectern.update.onNotice((message) => showNotice(message, 'success', 10000))
 
   // Ctrl +/-/0 zoom the document being read, never the application.
   window.lectern.onZoomKey((direction) => {

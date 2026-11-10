@@ -122,6 +122,17 @@ const api = {
       ipcRenderer.invoke('settings:install-authoring-kit')
   },
 
+  update: {
+    /** An update is already downloaded; installation waits for an ordinary quit. */
+    onNotice: (listener: (message: string) => void): (() => void) => {
+      const handler = (_event: unknown, message: unknown): void => {
+        if (typeof message === 'string') listener(message)
+      }
+      ipcRenderer.on('update:notice', handler)
+      return () => ipcRenderer.removeListener('update:notice', handler)
+    }
+  },
+
   voice: {
     /** Neural voices present on disk. Empty until one is installed. */
     list: (): Promise<PiperVoice[]> => ipcRenderer.invoke('voice:list'),

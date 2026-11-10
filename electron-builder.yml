@@ -6,6 +6,11 @@ directories:
   output: release
   buildResources: resources
 
+publish:
+  provider: github
+  owner: daitanfutekina
+  repo: lectern
+
 # Only the main process and the preload resolve modules at run time. The
 # renderer bundles everything it imports, and its heavy assets -- MathJax, the
 # Tesseract cores and language data, the pdf.js worker, the cmaps and standard
@@ -35,27 +40,40 @@ files:
   - node_modules/@napi-rs/canvas-win32-x64-msvc/**
   - node_modules/@xmldom/xmldom/**
   - node_modules/adm-zip/**
+  - node_modules/argparse/**
   - node_modules/boolean/**
+  - node_modules/builder-util-runtime/**
   - node_modules/commander/**
+  - node_modules/debug/**
   - node_modules/define-data-property/**
   - node_modules/define-properties/**
   - node_modules/detect-node/**
+  - node_modules/electron-updater/**
   - node_modules/es-define-property/**
   - node_modules/es-errors/**
   - node_modules/es6-error/**
   - node_modules/escape-string-regexp/**
   - node_modules/fflate/**
+  - node_modules/fs-extra/**
   - node_modules/global-agent/**
   - node_modules/globalthis/**
   - node_modules/gopd/**
+  - node_modules/graceful-fs/**
   - node_modules/has-property-descriptors/**
+  - node_modules/js-yaml/**
   - node_modules/json-stringify-safe/**
+  - node_modules/jsonfile/**
+  - node_modules/lazy-val/**
+  - node_modules/lodash.escaperegexp/**
+  - node_modules/lodash.isequal/**
   - node_modules/matcher/**
+  - node_modules/ms/**
   - node_modules/object-keys/**
   - node_modules/onnxruntime-common/**
   - node_modules/onnxruntime-node/**
   - node_modules/pdfjs-dist/**
   - node_modules/roarr/**
+  - node_modules/sax/**
   - node_modules/semver/**
   - node_modules/semver-compare/**
   - node_modules/serialize-error/**
@@ -64,7 +82,9 @@ files:
   - node_modules/speech-rule-engine/**
   - node_modules/sprintf-js/**
   - node_modules/temml/**
+  - node_modules/tiny-typed-emitter/**
   - node_modules/type-fest/**
+  - node_modules/universalify/**
   - node_modules/wicked-good-xpath/**
   - node_modules/yaml/**
   # onnxruntime-node ships every platform it supports: 283 MB of darwin, linux

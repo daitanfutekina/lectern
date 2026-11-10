@@ -6,8 +6,9 @@ to the same speech controls, while PDFs still look like PDFs and EPUBs keep the
 publisher's typography.
 
 Lectern is currently **Windows-only**. The build produces a Windows x64
-installer. Public release hosting, code signing, and automatic updates are not
-set up yet, and the license is not yet decided.
+installer. Installers will be published on the
+[GitHub Releases page](https://github.com/daitanfutekina/lectern/releases).
+They are not code-signed, so Windows may show an unrecognized-app warning.
 
 ## What it does
 
@@ -37,8 +38,10 @@ to the other book formats.
 
 ## Install
 
-There is no hosted public installer yet. To build the current Windows installer
-from source, install Node.js and npm, then run these commands from the repository:
+Download the latest installer from the
+[GitHub Releases page](https://github.com/daitanfutekina/lectern/releases), or
+build it from source by installing Node.js and npm and running these commands
+from the repository:
 
 ```powershell
 npm.cmd ci
@@ -46,9 +49,11 @@ npm.cmd run package
 ```
 
 The generated x64 installer is placed in `release/`. Run that `.exe` and follow
-the installation prompts. The installer is not yet code-signed, so Windows may
-show an unrecognized-app warning. Lectern does not yet update itself; install a
-new build manually when one is available.
+the installation prompts. The installer is unsigned, so Windows may show an
+unrecognized-app warning. Lectern checks for updates in the background by
+default, downloads them without blocking reading, and installs a ready update
+when the app is next quit. Turn off **Update automatically** in Settings to
+disable those checks.
 
 ## Create a library and add books
 
@@ -86,7 +91,7 @@ local and works offline.
 
 Other Piper or Kokoro voices and optional character-voice models can be
 installed manually. They are not bundled because the model files are large.
-See [docs/VOICES.md](docs/VOICES.md) for the supported folder layout and model
+See [VOICES.md](VOICES.md) for the supported folder layout and model
 details.
 
 ## Write your own books with Claude
@@ -118,18 +123,25 @@ Books, progress, settings, OCR results, prepared speech, and installed voices
 stay on the computer. Lectern requires no account or paid service, and ordinary
 reading uses local files and bundled libraries.
 
-Network access is limited to two reading features:
+Network access is limited to three features:
 
 - A chapter may contain a sandboxed remote embed. That embed may need the
   network, but the chapter text remains local and readable when it cannot load.
 - The free Piper voice is downloaded only after the reader explicitly clicks
   the install button. Speech is local after installation.
+- Packaged builds check GitHub Releases for updates in the background when
+  **Update automatically** is on. A failed check is silent, reading remains
+  available offline, and the setting can be turned off in Settings.
 
 Web links in books and PDFs open in the system browser only when clicked.
 
 ## Documentation
 
-- [docs/VOICES.md](docs/VOICES.md) — neural and character voice setup
-- [docs/SPEC.md](docs/SPEC.md) — product constraints and architecture
-- [docs/FINDINGS.md](docs/FINDINGS.md) — experiments behind implementation decisions
+- [VOICES.md](VOICES.md) — neural and character voice setup
 - [resources/authoring/textbook/SKILL.md](resources/authoring/textbook/SKILL.md) — the bundled writing guide
+
+## License
+
+Lectern is available under the [MIT License](LICENSE). Licenses and notices for
+production dependencies and vendored assets are collected in
+[THIRD_PARTY_NOTICES.txt](resources/THIRD_PARTY_NOTICES.txt).
