@@ -33,6 +33,13 @@
       content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' book: https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: book:; media-src 'self' blob: book:; font-src 'self'; connect-src 'self' blob: data:"
     />
     <title>Lectern</title>
+    <script>
+      // The main process puts the stored theme in the URL so the first painted
+      // frame matches it; waiting for renderer IPC would flash the dark default.
+      if (new URLSearchParams(location.search).get('theme') === 'light') {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
   </head>
   <body>
     <div id="drop-overlay"><span>Drop to add to the library</span></div>

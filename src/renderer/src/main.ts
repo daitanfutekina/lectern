@@ -1023,6 +1023,7 @@ async function openEpubChapter(
   const rendered = await renderEpub(
     host,
     html,
+    settings.theme,
     (href) => followEpubLink(book, chapter, href),
     (block) => {
       reader.jumpTo(reader.indexNear(block))
@@ -2223,6 +2224,7 @@ function showCollapsed(hidden: boolean): void {
 
 function applySettings(): void {
   const root = document.documentElement
+  root.dataset.theme = settings.theme
   root.style.setProperty('--font-size-scale', String(settings.fontScale))
   root.style.setProperty('--measure', `${settings.measure}ch`)
 

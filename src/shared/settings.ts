@@ -1,6 +1,7 @@
 import { BOOK_VOICE, clampShape, type VoiceShape } from './voice'
 import { DEFAULT_GATE, type GateSettings } from './math-gate'
 import { isShelfSort, type ShelfSort } from './shelf'
+import type { Theme } from './theme'
 
 /**
  * Everything the reader can change. SPEC section 7.
@@ -15,7 +16,7 @@ export interface Settings {
   /* Reading */
   readonly fontScale: number
   readonly measure: number
-  readonly theme: 'dark' | 'light'
+  readonly theme: Theme
 
   /* Speech */
   readonly voiceId: string | null

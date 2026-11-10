@@ -64,6 +64,7 @@ import { findBook } from '@shared/library'
 import { ASSET_SCHEME, parseAssetUrl } from '@shared/assets'
 import { bookmarkId } from '@shared/progress'
 import type { LibraryIndex } from '@shared/library'
+import { windowBackground, type Theme } from '@shared/theme'
 import type { ReadingPosition } from '@shared/progress'
 import type { VoiceDownloadResponse } from '@shared/voice-download'
 import { formatFatalError, type FatalErrorKind } from '@shared/fatal-error'
@@ -197,7 +198,7 @@ function conversion(indexRate: unknown, protect: unknown): { indexRate: number; 
   }
 }
 
-function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
+function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS, theme: Theme = 'dark'): BrowserWindow {
   const window = new BrowserWindow({
     // Width is overridable so a resize can be verified end to end: the point
     // of anchoring to blocks is that reopening narrower lands on the same
@@ -208,7 +209,7 @@ function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
     minWidth: 640,
     minHeight: 480,
     show: false,
-    backgroundColor: '#0d1117',
+    backgroundColor: windowBackground(theme),
     autoHideMenuBar: true,
     title: 'Lectern',
     // Packaged, Windows would take this from the executable anyway; set here so
@@ -304,11 +305,11 @@ function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS): BrowserWindow {
     if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url)
   })
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void window.loadURL(`${SCHEME}://lectern/index.html`)
-  }
+  const rendererUrl = new URL(
+    process.env['ELECTRON_RENDERER_URL'] ?? `${SCHEME}://lectern/index.html`
+  )
+  rendererUrl.searchParams.set('theme', theme)
+  void window.loadURL(rendererUrl.toString())
 
   return window
 }
@@ -809,7 +810,8 @@ void app.whenReady().then(async () => {
     return removeBookmark(bookId, id)
   })
 
-  const window = createWindow(await loadWindowBounds())
+  const [bounds, initialSettings] = await Promise.all([loadWindowBounds(), loadSettings()])
+  const window = createWindow(bounds, initialSettings.theme)
 
   // Editing a chapter in Claude Code and seeing it in the reader is the loop
   // M7 exists to close, so the reader is told rather than having to be told.
@@ -825,7 +827,9 @@ void app.whenReady().then(async () => {
   if (capturePath) void captureAndExit(window, capturePath)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void loadSettings().then((stored) => createWindow(DEFAULT_BOUNDS, stored.theme))
+    }
   })
 })
 

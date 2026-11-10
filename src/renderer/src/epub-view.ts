@@ -1,4 +1,5 @@
 import { epubReadBlock } from '@shared/epub-click'
+import { epubHostSheet, type Theme } from '@shared/theme'
 
 /**
  * Showing an EPUB with its own typography. SPEC section 3, as amended.
@@ -41,31 +42,6 @@ export function listenForEpubRead(doc: Document, onReadFrom: EpubReadHandler): v
 }
 
 /**
- * A dark-mode nudge, and nothing more.
- *
- * Most EPUBs assume black on white. Forcing our palette onto the book is what
- * this module exists not to do, so the sheet sets a background and lets colour
- * that the book actually specifies win. `color-scheme` asks the frame's own
- * form controls and scrollbars to match.
- */
-const HOST_SHEET = `
-  :root { color-scheme: dark; }
-  html, body {
-    background: #14181f;
-    color: #e6edf3;
-    margin: 0;
-    padding: 32px 40px 96px;
-    max-width: 46em;
-    margin-inline: auto;
-    line-height: 1.7;
-  }
-  img, svg, video { max-width: 100%; height: auto; }
-  a { color: #58a6ff; }
-  ::selection { background: rgba(88,166,255,0.35); }
-  ::highlight(spoken) { background: rgba(88,166,255,0.34); }
-`
-
-/**
  * Render a chapter into a frame inside `container`.
  *
  * Resolves once the document has parsed, so the caller can walk it for speech.
@@ -73,6 +49,7 @@ const HOST_SHEET = `
 export function renderEpub(
   container: HTMLElement,
   html: string,
+  theme: Theme,
   onLink?: (href: string) => void,
   onReadFrom?: EpubReadHandler
 ): Promise<EpubFrame | null> {
@@ -109,10 +86,10 @@ export function renderEpub(
       settled = true
 
       const style = doc.createElement('style')
-      // Appended last so the book's own rules, already in the head, take
-      // precedence over these where they disagree.
-      style.textContent = HOST_SHEET
-      doc.head?.append(style)
+      // Inserted first as well as using zero-specificity selectors: these are
+      // absent-style defaults, never a reason to overrule the publisher.
+      style.textContent = epubHostSheet(theme)
+      doc.head?.prepend(style)
 
       /*
         Every link in the book, handed back to the caller.

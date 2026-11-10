@@ -46,6 +46,9 @@ export function renderSettings(container: HTMLElement, context: SettingsContext)
 
   page.append(
     section('Reading', [
+      toggle('Light theme', context.settings.theme === 'light', (value) =>
+        context.onChange({ theme: value ? 'light' : 'dark' })
+      ),
       slider('Text size', context.settings.fontScale, 0.8, 1.6, 0.05, (value) =>
         context.onChange({ fontScale: value })
       , (value) => `${Math.round(value * 100)}%`),
