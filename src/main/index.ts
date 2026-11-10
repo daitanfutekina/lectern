@@ -10,13 +10,13 @@ import {
   type OpenDialogOptions
 } from 'electron'
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { join, resolve as resolvePath, sep as pathSep } from 'node:path'
+import { basename, join, resolve as resolvePath, sep as pathSep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_ROOT, bookCover, readChapterSource, saveIndex, scanLibrary } from './library'
 import { changeLibraryRoot, resolveLibraryRoot } from './library-location'
 import { authoringKitSource, installAuthoringKit } from './authoring-kit'
 import { configureMath, speakMath } from './math-speech'
-import { closePdf, pdfBytes } from './pdf'
+import { closePdf, configurePdfPasswordPrompt, pdfBytes, pdfPassword } from './pdf'
 import { closeEpub, epubCover } from './epub'
 import { cachedPages, configureOcrCache, documentKey, readRange, writePage } from './ocr-cache'
 import { addFlag, configureFlags, exportIndex, loadFlags, removeFlag } from './flags'
@@ -148,6 +148,27 @@ protocol.registerSchemesAsPrivileged([
 let cached: LibraryIndex | null = null
 let libraryRoot = DEFAULT_ROOT
 let activeVoiceDownload: AbortController | null = null
+let passwordRequestId = 0
+const pendingPasswords = new Map<
+  number,
+  { readonly senderId: number; readonly resolve: (password: string | null) => void }
+>()
+
+/** Ask inside the app and keep the answer in memory only. */
+function requestPdfPassword(path: string, attempt: 'required' | 'incorrect'): Promise<string | null> {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (!window || window.isDestroyed()) return Promise.resolve(null)
+
+  const id = ++passwordRequestId
+  return new Promise((resolve) => {
+    pendingPasswords.set(id, { senderId: window.webContents.id, resolve })
+    window.webContents.send('pdf:password-request', {
+      id,
+      name: basename(path),
+      incorrect: attempt === 'incorrect'
+    })
+  })
+}
 
 async function library(rescan = false): Promise<LibraryIndex> {
   if (!cached || rescan) {
@@ -339,6 +360,7 @@ void app.whenReady().then(async () => {
   configureOcrCache(root())
   configureFlags(root())
   configureDocuments(root())
+  configurePdfPasswordPrompt(requestPdfPassword)
   configurePiper(root())
   configureSettings(root())
   configureSpeechStore(root())
@@ -347,6 +369,14 @@ void app.whenReady().then(async () => {
 
   ipcMain.handle('library:get', () => library())
   ipcMain.handle('library:rescan', () => library(true))
+
+  ipcMain.on('pdf:password-response', (event, id: unknown, password: unknown) => {
+    if (typeof id !== 'number') return
+    const pending = pendingPasswords.get(id)
+    if (!pending || pending.senderId !== event.sender.id) return
+    pendingPasswords.delete(id)
+    pending.resolve(typeof password === 'string' ? password : null)
+  })
 
   ipcMain.handle('math:configure', (_event, macros: unknown) => {
     configureMath(
@@ -602,6 +632,13 @@ void app.whenReady().then(async () => {
     const book = findBook(await library(), bookId)
     if (!book || book.format !== 'pdf') return null
     return pdfBytes(book.path)
+  })
+
+  ipcMain.handle('scan:password', async (_event, bookId: unknown) => {
+    if (typeof bookId !== 'string') return null
+    const book = findBook(await library(), bookId)
+    if (!book || book.format !== 'pdf') return null
+    return pdfPassword(book.path)
   })
 
   ipcMain.handle('scan:cached', async (_event, bookId: unknown, from: unknown, to: unknown) => {

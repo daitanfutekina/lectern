@@ -13,9 +13,13 @@
  * worth of pages in a loop and showed nothing at all until it finished.
  */
 
+import { pdfDestinationPage, pdfLinkAction } from '@shared/pdf-interaction'
+
 interface PdfDocumentLike {
   numPages: number
   getPage: (n: number) => Promise<PdfPageLike>
+  getDestination: (name: string) => Promise<unknown[] | null>
+  getPageIndex: (reference: unknown) => Promise<number>
 }
 
 interface PdfPageLike {
@@ -25,17 +29,28 @@ interface PdfPageLike {
     cancel?: () => void
   }
   getTextContent: () => Promise<{ items: unknown[] }>
+  getAnnotations: (options: { intent: 'display' }) => Promise<PdfAnnotation[]>
+}
+
+interface PdfAnnotation {
+  readonly annotationType?: number
+  readonly subtype?: string
+  readonly rect?: unknown
+  readonly url?: unknown
+  readonly dest?: unknown
 }
 
 interface Viewport {
   width: number
   height: number
   scale: number
+  convertToViewportRectangle: (rect: number[]) => [number, number, number, number]
 }
 
 interface PdfjsLike {
   getDocument: (options: unknown) => { promise: Promise<PdfDocumentLike> }
   GlobalWorkerOptions: { workerSrc: string }
+  AnnotationType?: { LINK: number }
   renderTextLayer?: (options: unknown) => { promise: Promise<void> }
   TextLayer?: new (options: unknown) => { render: () => Promise<void> }
 }
@@ -63,7 +78,10 @@ export async function openDocument(bookId: string): Promise<PdfDocumentLike | nu
   if (cached) return cached
 
   const lib = await pdfjs()
-  const bytes = await window.lectern.scan.bytes(bookId)
+  const [bytes, password] = await Promise.all([
+    window.lectern.scan.bytes(bookId),
+    window.lectern.scan.password(bookId)
+  ])
   if (!lib || !bytes) return null
 
   const document = await lib.getDocument({
@@ -78,7 +96,8 @@ export async function openDocument(bookId: string): Promise<PdfDocumentLike | nu
     */
     wasmUrl: './wasm/',
     standardFontDataUrl: './standard_fonts/',
-    iccUrl: './iccs/'
+    iccUrl: './iccs/',
+    ...(password === null ? {} : { password })
   }).promise
 
   documents.set(bookId, document)
@@ -228,6 +247,13 @@ export async function renderBook(
 
   build()
 
+  const goToPage = (page: number, instant = false): void => {
+    const wrapper = wrappers[Math.max(0, Math.min(page, wrappers.length) - 1)]
+    if (wrapper) {
+      scroller.scrollTo({ top: wrapper.offsetTop - 12, behavior: instant ? 'auto' : 'smooth' })
+    }
+  }
+
   const draw = async (number: number): Promise<void> => {
     const wrapper = wrappers[number - 1]
     if (!wrapper || drawn.has(number) || drawing.has(number)) return
@@ -260,12 +286,17 @@ export async function renderBook(
 
       const textLayer = window.document.createElement('div')
       textLayer.className = 'pdf-text-layer'
-      wrapper.replaceChildren(canvas, textLayer)
+      const linkLayer = window.document.createElement('div')
+      linkLayer.className = 'pdf-link-layer'
+      wrapper.replaceChildren(canvas, textLayer, linkLayer)
       await addTextLayer(lib, page, viewport, textLayer)
 
       drawn.add(number)
       release()
       onPageRendered(number, textLayer)
+      // Link metadata is independent of the canvas and text layer. Fetch it
+      // after the usable page is present so links cannot delay drawing.
+      void addLinkLayer(document, page, viewport, linkLayer, goToPage, lib?.AnnotationType?.LINK ?? 2)
     } catch {
       // One page failing is not a reason to lose the document.
     } finally {
@@ -314,10 +345,7 @@ export async function renderBook(
   observeAll()
 
   return {
-    goToPage: (page: number, instant = false) => {
-      const wrapper = wrappers[Math.max(0, Math.min(page, wrappers.length) - 1)]
-      if (wrapper) scroller.scrollTo({ top: wrapper.offsetTop - 12, behavior: instant ? 'auto' : 'smooth' })
-    },
+    goToPage,
     drawPage: (page: number) => draw(page),
     currentPage,
     setZoom: async (next: number) => {
@@ -335,6 +363,73 @@ export async function renderBook(
     zoom: () => zoom,
     destroy: () => observer.disconnect()
   }
+}
+
+/** Add only clickable rectangles; forms and every other PDF annotation stay inert. */
+async function addLinkLayer(
+  document: PdfDocumentLike,
+  page: PdfPageLike,
+  viewport: Viewport,
+  container: HTMLElement,
+  goToPage: (page: number) => void,
+  linkAnnotationType: number
+): Promise<void> {
+  try {
+    const annotations = await page.getAnnotations({ intent: 'display' })
+    if (!container.isConnected) return
+
+    for (const annotation of annotations) {
+      if (
+        (annotation.annotationType !== linkAnnotationType && annotation.subtype !== 'Link') ||
+        !validRect(annotation.rect)
+      ) {
+        continue
+      }
+      const action = pdfLinkAction(annotation)
+      if (action.kind === 'ignore') continue
+
+      const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(annotation.rect)
+      if ([x1, y1, x2, y2].some((value) => !Number.isFinite(value))) continue
+
+      const link = window.document.createElement('a')
+      link.className = 'pdf-link'
+      link.style.left = `${Math.min(x1, x2)}px`
+      link.style.top = `${Math.min(y1, y2)}px`
+      link.style.width = `${Math.abs(x2 - x1)}px`
+      link.style.height = `${Math.abs(y2 - y1)}px`
+
+      if (action.kind === 'external') {
+        link.href = action.url
+        link.target = '_blank'
+        link.rel = 'noreferrer'
+        link.setAttribute('aria-label', 'Open web link')
+      } else {
+        link.href = '#'
+        link.setAttribute('aria-label', 'Go to linked PDF page')
+        link.addEventListener('click', (event) => {
+          event.preventDefault()
+          void pdfDestinationPage(
+            action.destination,
+            (name) => document.getDestination(name),
+            (reference) => document.getPageIndex(reference)
+          ).then((target) => {
+            if (target !== null) goToPage(target)
+          })
+        })
+      }
+      container.append(link)
+    }
+  } catch {
+    // The rendered page and selectable text remain useful without its links.
+  }
+}
+
+function validRect(rect: unknown): rect is [number, number, number, number] {
+  return (
+    Array.isArray(rect) &&
+    rect.length === 4 &&
+    rect.every((value) => typeof value === 'number' && Number.isFinite(value))
+  )
 }
 
 /**

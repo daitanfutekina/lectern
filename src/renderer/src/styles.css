@@ -1632,6 +1632,38 @@ body.is-home #flag-bar {
   display: block;
 }
 
+.pdf-pages.is-night .pdf-page {
+  background: #111;
+}
+
+.pdf-pages.is-night .pdf-page canvas {
+  filter: invert(0.9) hue-rotate(180deg);
+}
+
+.pdf-link-layer {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pdf-link {
+  position: absolute;
+  border-radius: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pdf-link:hover {
+  background: rgb(88 166 255 / 0.18);
+  outline: 1px solid rgb(88 166 255 / 0.55);
+}
+
+.pdf-link:focus-visible {
+  background: rgb(88 166 255 / 0.22);
+  outline: 2px solid var(--accent);
+}
+
 /*
   pdf.js's text layer, over the canvas. It is what makes text selectable on a
   rendered page, and what gives word-follow something real to highlight on a
@@ -1669,6 +1701,73 @@ body.is-home #flag-bar {
 .pdf-page ::highlight(spoken) {
   background: rgb(255 200 0 / 0.45);
   color: transparent;
+}
+
+/* A protected file is unlocked in memory; this dialog is the only place its password exists in UI. */
+.pdf-password-backdrop {
+  position: fixed;
+  z-index: 100;
+  display: grid;
+  background: rgb(0 0 0 / 0.65);
+  inset: 0;
+  place-items: center;
+}
+
+.pdf-password-dialog {
+  display: grid;
+  width: min(420px, calc(100vw - 48px));
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.45);
+  color: var(--text);
+}
+
+.pdf-password-dialog h2,
+.pdf-password-dialog p {
+  margin: 0;
+}
+
+.pdf-password-dialog p {
+  color: var(--text-muted);
+}
+
+.pdf-password-dialog input {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.pdf-password-dialog input:focus-visible {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+.pdf-password-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pdf-password-actions button {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.pdf-password-actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--strong-text);
 }
 
 /* ── EPUB frame ────────────────────────────────────────────────────── */

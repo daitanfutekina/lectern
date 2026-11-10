@@ -36,6 +36,7 @@ import { cancelScan, pagesToHtml, scanRange, type ScanProgress } from './scan-qu
 import { hasCover, renderHome, setCover } from './home'
 import { type ShelfSort } from '@shared/shelf'
 import { pageText, pdfCover, renderBook, type PdfView } from './pdf-view'
+import { promptForPdfPassword } from './pdf-password-view'
 import { clearResult, locate, showResult } from './find-view'
 import { PER_CHAPTER, findMatches, htmlPlain, markdownPlain, queryPattern, type Match } from '@shared/find'
 import { renderEpub } from './epub-view'
@@ -948,6 +949,7 @@ async function openPdfChapter(
   pdfPages.clear()
 
   const pages = element('div', 'pdf-pages')
+  pages.classList.toggle('is-night', settings.pdfNight)
   container.replaceChildren(pages)
   container.scrollTop = 0
 
@@ -2360,6 +2362,10 @@ function resumeTarget(): { bookId: string; file: string } | null {
 
 async function start(): Promise<void> {
   const container = el<HTMLElement>('content')
+
+  // Indexing needs the password before a protected PDF can reach the shelf.
+  // The bridge returns it to pdf.js in memory and never writes it to settings.
+  window.lectern.scan.onPasswordRequest(promptForPdfPassword)
 
   // Ctrl +/-/0 zoom the document being read, never the application.
   window.lectern.onZoomKey((direction) => {

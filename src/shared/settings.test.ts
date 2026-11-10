@@ -36,6 +36,12 @@ describe('parseSettings', () => {
     expect(parsed.sort).toBe('added')
   })
 
+  it('remembers the opt-in PDF night setting and leaves it off by default', () => {
+    expect(parseSettings('{}').pdfNight).toBe(false)
+    expect(parseSettings(JSON.stringify({ pdfNight: true })).pdfNight).toBe(true)
+    expect(parseSettings(JSON.stringify({ pdfNight: 'yes' })).pdfNight).toBe(false)
+  })
+
   /*
     The section list defaults to shown, so `false` is the value with something to
     prove. This is the shape of the shelf-sort bug: a choice that reads back as

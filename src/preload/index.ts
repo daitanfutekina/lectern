@@ -244,6 +244,27 @@ const api = {
     /** Raw bytes of a PDF, so the renderer can rasterise its pages. */
     bytes: (bookId: string): Promise<ArrayBuffer | null> =>
       ipcRenderer.invoke('scan:bytes', bookId),
+    /** A password already accepted while indexing this PDF, held for this launch only. */
+    password: (bookId: string): Promise<string | null> =>
+      ipcRenderer.invoke('scan:password', bookId),
+    /** Answer a main-process PDF password challenge with an in-app prompt. */
+    onPasswordRequest: (
+      listener: (request: { name: string; incorrect: boolean }) => Promise<string | null>
+    ): (() => void) => {
+      const handler = async (
+        _event: unknown,
+        request: { id: number; name: string; incorrect: boolean }
+      ): Promise<void> => {
+        let password: string | null = null
+        try {
+          password = await listener({ name: request.name, incorrect: request.incorrect })
+        } finally {
+          ipcRenderer.send('pdf:password-response', request.id, password)
+        }
+      }
+      ipcRenderer.on('pdf:password-request', handler)
+      return () => ipcRenderer.removeListener('pdf:password-request', handler)
+    },
     /** Pages of a range already recognised, in order; nulls are still to do. */
     cached: (
       bookId: string,

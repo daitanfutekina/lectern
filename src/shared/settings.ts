@@ -17,6 +17,8 @@ export interface Settings {
   readonly fontScale: number
   readonly measure: number
   readonly theme: Theme
+  /** Invert rendered PDF pages for night reading. Off keeps the document unchanged. */
+  readonly pdfNight: boolean
 
   /* Speech */
   readonly voiceId: string | null
@@ -72,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontScale: 1,
   measure: 72,
   theme: 'dark',
+  pdfNight: false,
   voiceId: null,
   neural: true,
   rate: 1,
@@ -118,6 +121,7 @@ export function parseSettings(source: string): Settings {
     fontScale: num(raw['fontScale'], 1, 0.8, 1.6),
     measure: num(raw['measure'], 72, 45, 120),
     theme: raw['theme'] === 'light' ? 'light' : 'dark',
+    pdfNight: bool(raw['pdfNight'], false),
     voiceId: typeof raw['voiceId'] === 'string' ? raw['voiceId'] : null,
     neural: bool(raw['neural'], true),
     rate: num(raw['rate'], 1, 0.5, 3),

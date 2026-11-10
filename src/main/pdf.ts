@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { assemblePage, cleanPage, repeatedLines, type TextItem } from '@shared/pdf-text'
+import { answerPdfPasswordChallenge, type PdfPasswordAttempt } from '@shared/pdf-interaction'
 import type { BookPart, Chapter, PageSection } from '@shared/library'
 
 /**
@@ -55,6 +56,18 @@ export interface PdfBook {
 }
 
 const opened = new Map<string, PdfBook>()
+const passwords = new Map<string, string>()
+type PasswordPrompt = (path: string, attempt: PdfPasswordAttempt) => Promise<string | null>
+let passwordPrompt: PasswordPrompt | null = null
+
+/** Passwords live only in this process and disappear when the app exits. */
+export function configurePdfPasswordPrompt(prompt: PasswordPrompt): void {
+  passwordPrompt = prompt
+}
+
+export function pdfPassword(path: string): string | null {
+  return passwords.get(path) ?? null
+}
 
 /**
  * Let go of a document that has left the library.
@@ -64,6 +77,7 @@ const opened = new Map<string, PdfBook>()
  */
 export function closePdf(path: string): void {
   const book = opened.get(path)
+  passwords.delete(path)
   if (!book) return
   opened.delete(path)
   void book.document.destroy().catch(() => {
@@ -71,7 +85,13 @@ export function closePdf(path: string): void {
   })
 }
 
-function pdfjs(): { getDocument: (options: unknown) => { promise: Promise<PdfDocument> } } {
+interface PdfLoadingTask {
+  readonly promise: Promise<PdfDocument>
+  onPassword: ((updatePassword: (password: string) => void, reason: number) => void) | null
+  destroy: () => Promise<void>
+}
+
+function pdfjs(): { getDocument: (options: unknown) => PdfLoadingTask } {
   return require('pdfjs-dist/legacy/build/pdf.mjs')
 }
 
@@ -102,7 +122,29 @@ export async function openPdf(path: string): Promise<PdfBook> {
   if (cached) return cached
 
   const data = new Uint8Array(await readFile(path))
-  const document = await pdfjs().getDocument({ data, useSystemFonts: true }).promise
+  let acceptedPassword = passwords.get(path) ?? null
+  const task = pdfjs().getDocument({
+    data,
+    useSystemFonts: true,
+    ...(acceptedPassword === null ? {} : { password: acceptedPassword })
+  })
+  if (passwordPrompt) {
+    task.onPassword = (updatePassword, reason) => {
+      void answerPdfPasswordChallenge(
+        reason,
+        (attempt) => passwordPrompt!(path, attempt),
+        (password) => {
+          acceptedPassword = password
+          updatePassword(password)
+        },
+        () => {
+          void task.destroy()
+        }
+      )
+    }
+  }
+  const document = await task.promise
+  if (acceptedPassword !== null) passwords.set(path, acceptedPassword)
 
   // Sample rather than scan: on a 948-page book, reading every page to decide
   // whether it has text would cost more than reading the part being read.
