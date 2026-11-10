@@ -47,9 +47,10 @@
       <aside id="sidebar">
         <header id="sidebar-head">
           <h1>Lectern</h1>
-          <button id="collapse" type="button" title="Hide the sidebar">‹</button>
+          <button id="collapse" type="button" title="Hide the sidebar" aria-label="Hide the sidebar">‹</button>
           <button id="home" type="button" title="Back to the shelf">Library</button>
           <button id="settings" type="button" title="Settings">Settings</button>
+          <button id="shortcuts" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
         </header>
         <nav id="books"></nav>
         <div id="flags"></div>
@@ -61,7 +62,7 @@
         <section id="find-bar" hidden aria-label="Find in this book">
           <div class="find-row">
             <input id="find-input" type="search" placeholder="Find in this book" autocomplete="off" spellcheck="false" />
-            <button id="find-close" type="button" title="Close (Esc)">×</button>
+            <button id="find-close" type="button" title="Close (Esc)" aria-label="Close find">×</button>
           </div>
           <p id="find-status" aria-live="polite"></p>
           <div id="find-results"></div>
@@ -71,14 +72,15 @@
             <p>Choose a chapter.</p>
           </div>
         </div>
+        <div id="chapter-loading" hidden role="status">Opening chapter…</div>
         <div id="scan-progress" hidden></div>
         <div id="prepare-progress" hidden></div>
         <div id="player">
           <button id="play" type="button" title="Read aloud (Space, or double-click a paragraph)">▶ Read aloud</button>
-          <button id="prev-block" type="button" title="Previous sentence">↑</button>
-          <button id="next-block" type="button" title="Next sentence">↓</button>
-          <button id="prev-section" type="button" title="Previous section">⇤</button>
-          <button id="next-section" type="button" title="Next section">⇥</button>
+          <button id="prev-block" type="button" title="Previous sentence" aria-label="Previous sentence">↑</button>
+          <button id="next-block" type="button" title="Next sentence" aria-label="Next sentence">↓</button>
+          <button id="prev-section" type="button" title="Previous section" aria-label="Previous section">⇤</button>
+          <button id="next-section" type="button" title="Next section" aria-label="Next section">⇥</button>
           <span id="speech-position"></span>
           <label id="rate-control">
             Speed
@@ -105,6 +107,8 @@
         </div>
       </main>
     </div>
+    <div id="shortcut-overlay" hidden></div>
+    <div id="notices" aria-live="polite" aria-atomic="false"></div>
 
     <script type="module" src="./src/main.ts"></script>
   </body>

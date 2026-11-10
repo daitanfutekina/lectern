@@ -23,6 +23,7 @@ export interface BookPart {
 
 export interface BookManifest {
   readonly title: string | null
+  readonly author: string | null
   readonly index: string | null
   readonly chapters: readonly string[]
   readonly parts: readonly BookPart[]
@@ -31,6 +32,7 @@ export interface BookManifest {
 
 export const EMPTY_MANIFEST: BookManifest = {
   title: null,
+  author: null,
   index: null,
   chapters: [],
   parts: [],
@@ -104,6 +106,7 @@ export function parseManifest(source: string): BookManifest {
   const chapters = chapterList(raw['chapters'])
   return {
     title: str(raw['title']),
+    author: str(raw['author']),
     index: str(raw['index']),
     chapters,
     parts: partList(raw['parts'], chapters),

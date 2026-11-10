@@ -13,6 +13,8 @@ class FakeElement {
   type = ''
   title = ''
   accept = ''
+  value = ''
+  placeholder = ''
   hidden = false
   multiple = false
   files: File[] | null = null
@@ -183,5 +185,26 @@ describe('empty library', () => {
     expect(findByClass(container, 'shelf-meta')?.textContent).toBe('File moved · Click to locate')
     card?.click()
     expect(onOpen).toHaveBeenCalledWith('one')
+  })
+
+  it('hides search on a small shelf and filters a large one by author', () => {
+    const small = render(Array.from({ length: 7 }, (_, at) => ({ ...book, id: `small-${at}` })))
+    expect(findByClass(small, 'shelf-search')).toBeNull()
+
+    const largeBooks = Array.from({ length: 8 }, (_, at) => ({
+      ...book,
+      id: `large-${at}`,
+      title: `Book ${at}`,
+      author: at === 5 ? 'Octavia Butler' : `Author ${at}`
+    }))
+    const large = render(largeBooks)
+    const search = findByClass(large, 'shelf-search')
+    const shelf = findByClass(large, 'shelf')
+
+    expect(search?.attributes.get('aria-label')).toContain('title or author')
+    if (search) search.value = 'butler'
+    search?.dispatch('input')
+    expect(shelf?.children).toHaveLength(1)
+    expect(findByClass(shelf!, 'shelf-title')?.textContent).toBe('Book 5')
   })
 })

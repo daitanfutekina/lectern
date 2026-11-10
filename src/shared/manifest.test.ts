@@ -3,6 +3,7 @@ import { parseManifest } from './manifest'
 
 const BOOK = `
 title: "A Book"
+author: "A. Reader"
 index: "idx.md"
 chapters:
   - a_ch1_one.md
@@ -11,6 +12,12 @@ chapters:
 `
 
 describe('parseManifest parts', () => {
+  it('keeps searchable book metadata', () => {
+    const manifest = parseManifest(BOOK)
+    expect(manifest.title).toBe('A Book')
+    expect(manifest.author).toBe('A. Reader')
+  })
+
   it('is empty for a book that declares none, which is most of them', () => {
     const m = parseManifest(BOOK)
     expect(m.chapters).toHaveLength(3)

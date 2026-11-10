@@ -22,6 +22,7 @@ export interface DocumentAddFailure {
 
 export interface DocumentAddResult {
   readonly added: number
+  readonly duplicates: number
   readonly failures: readonly DocumentAddFailure[]
 }
 

@@ -27,6 +27,7 @@ type PdfDocument = {
   getPageIndex: (ref: unknown) => Promise<number>
   /** Resolves a named destination -- `dest` as a string rather than an array. */
   getDestination: (name: string) => Promise<unknown[] | null>
+  getMetadata: () => Promise<{ info: object; metadata: unknown }>
   destroy: () => Promise<void>
 }
 interface OutlineEntry {
@@ -53,6 +54,7 @@ export interface PdfBook {
   readonly ranges: Readonly<Record<string, { from: number; to: number }>>
   readonly digital: boolean
   readonly pages: number
+  readonly author: string | null
 }
 
 const opened = new Map<string, PdfBook>()
@@ -149,6 +151,8 @@ export async function openPdf(path: string): Promise<PdfBook> {
   // Sample rather than scan: on a 948-page book, reading every page to decide
   // whether it has text would cost more than reading the part being read.
   const digital = await hasTextLayer(document)
+  const metadata = await document.getMetadata()
+  const author = pdfAuthor(metadata.info)
 
   const ranges: Record<string, { from: number; to: number }> = {}
   const outlined = await outlineChapters(document)
@@ -159,9 +163,14 @@ export async function openPdf(path: string): Promise<PdfBook> {
     if (parsed) ranges[chapter.file] = { from: Number(parsed[1]), to: Number(parsed[2]) }
   }
 
-  const book: PdfBook = { document, chapters, parts, ranges, digital, pages: document.numPages }
+  const book: PdfBook = { document, chapters, parts, ranges, digital, pages: document.numPages, author }
   opened.set(path, book)
   return book
+}
+
+function pdfAuthor(info: object): string | null {
+  const value = (info as { readonly Author?: unknown }).Author
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 async function hasTextLayer(document: PdfDocument): Promise<boolean> {

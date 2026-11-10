@@ -56,6 +56,10 @@ import {
   pdfPageRange,
   pdfPageTarget
 } from '@shared/pdf-navigation'
+import { shortcutForEvent } from '@shared/shortcuts'
+import { beginDelayedLoading } from './loading-view'
+import { showNotice } from './notice'
+import { renderShortcutOverlay } from './shortcut-view'
 
 /**
  * The reading surface. SPEC section 10: no Node access, no filesystem, no
@@ -131,6 +135,34 @@ const reader = new Reader()
 let positionTracker: ReturnType<typeof trackPosition> | null = null
 
 const el = <T extends HTMLElement>(id: string): T | null => document.querySelector<T>(`#${id}`)
+
+let shortcutReturnFocus: HTMLElement | null = null
+
+function closeShortcutHelp(): void {
+  const overlay = el<HTMLElement>('shortcut-overlay')
+  if (!overlay || overlay.hidden) return
+  overlay.hidden = true
+  const app = el<HTMLElement>('app')
+  if (app) app.inert = false
+  shortcutReturnFocus?.focus()
+  shortcutReturnFocus = null
+}
+
+function toggleShortcutHelp(): void {
+  const overlay = el<HTMLElement>('shortcut-overlay')
+  if (!overlay) return
+  if (!overlay.hidden) {
+    closeShortcutHelp()
+    return
+  }
+
+  shortcutReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const close = renderShortcutOverlay(overlay, closeShortcutHelp)
+  const app = el<HTMLElement>('app')
+  if (app) app.inert = true
+  overlay.hidden = false
+  close.focus()
+}
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -628,6 +660,7 @@ function renderBookmarks(): void {
     const remove = element('button', 'bookmark-remove', '×')
     remove.type = 'button'
     remove.title = 'Remove bookmark'
+    remove.setAttribute('aria-label', `Remove bookmark ${mark.label}`)
     remove.addEventListener('click', () => void dropBookmark(book.id, mark.id))
 
     row.append(jump, remove)
@@ -785,26 +818,25 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   current = { bookId, file }
   renderSidebar()
   renderNav(book, chapter)
+  const finishLoading = beginDelayedLoading(el<HTMLElement>('chapter-loading'))
 
-  const source = await window.lectern.library.chapter(bookId, file)
-  if (source === null) {
-    container.replaceChildren(element('p', 'placeholder', 'That chapter could not be read.'))
-    restoring = false
-    return
-  }
+  try {
+    const source = await window.lectern.library.chapter(bookId, file)
+    if (source === null) {
+      container.replaceChildren(element('p', 'placeholder', 'That chapter could not be read.'))
+      return
+    }
 
   // A PDF is shown as a PDF and an EPUB keeps its own typography. Only our own
   // books go through the Markdown pipeline and wear the application's design.
-  if (book.format === 'pdf') {
-    await openPdfChapter(container, book, chapter, at)
-    restoring = false
-    return
-  }
-  if (book.format === 'epub') {
-    await openEpubChapter(container, book, chapter, source, at)
-    restoring = false
-    return
-  }
+    if (book.format === 'pdf') {
+      await openPdfChapter(container, book, chapter, at)
+      return
+    }
+    if (book.format === 'epub') {
+      await openEpubChapter(container, book, chapter, source, at)
+      return
+    }
 
   const isMarkdown = book.format === 'markdown'
   const { matter, body } = isMarkdown
@@ -865,8 +897,11 @@ async function open(bookId: string, file: string, at?: ReadingPosition): Promise
   const marker = rendered.querySelector<HTMLElement>('[data-scan]')
   if (marker) startScan(bookId, marker, rendered)
 
-  void window.lectern.progress.open(bookId, file)
-  restoring = false
+    void window.lectern.progress.open(bookId, file)
+  } finally {
+    restoring = false
+    finishLoading()
+  }
 }
 
 /**
@@ -1514,6 +1549,7 @@ function renderFlags(): void {
     const remove = element('button', 'flag-remove', '×')
     remove.type = 'button'
     remove.title = 'Remove flag'
+    remove.setAttribute('aria-label', `Remove ${FLAG_LABELS[flag.kind]} flag`)
     remove.addEventListener('click', () => {
       void window.lectern.flags.remove(flag.id).then((store) => {
         flags = store.flags
@@ -2079,19 +2115,18 @@ async function addFiles(files: readonly File[]): Promise<void> {
   if (result.added > 0) {
     await load(true)
     showHome()
+    showNotice(`Added ${result.added} book${result.added === 1 ? '' : 's'} to the library.`, 'success')
+  }
+  if (result.duplicates > 0) {
+    showNotice(`Skipped ${result.duplicates} book${result.duplicates === 1 ? '' : 's'} already in the library.`)
   }
   if (result.failures.length > 0) {
     presentAddFailures(result.failures)
-  } else if (result.added === 0) {
-    announce('Already in the library.')
   }
 }
 
-/** The one presentation seam T16's shared notice component will replace. */
 function presentAddFailures(failures: readonly DocumentAddFailure[]): void {
-  const message = `Could not add: ${documentAddFailureMessage(failures)}`
-  if (document.querySelector('.shelf-hint')) announce(message)
-  else window.alert(message)
+  showNotice(`Could not add: ${documentAddFailureMessage(failures)}`, 'error')
 }
 
 /** Ask for a moved file's new path, then repaint it under the same progress id. */
@@ -2101,12 +2136,12 @@ async function locateBook(bookId: string): Promise<void> {
   if (result.located) {
     await load(true)
     showHome()
-    announce(`Found ${book?.title ?? 'the book'}. Your reading progress is unchanged.`)
+    showNotice(`Found ${book?.title ?? 'the book'}. Your reading progress is unchanged.`, 'success')
     return
   }
-  if (result.reason === 'wrong-format') announce('Choose the same kind of file as the missing book.')
-  if (result.reason === 'already-added') announce('That file is already on the shelf.')
-  if (result.reason === 'unreadable') announce('That file could not be opened.')
+  if (result.reason === 'wrong-format') showNotice('Choose the same kind of file as the missing book.', 'error')
+  if (result.reason === 'already-added') showNotice('That file is already on the shelf.')
+  if (result.reason === 'unreadable') showNotice('That file could not be opened.', 'error')
 }
 
 /** Take an added document off the shelf. The main process asks first. */
@@ -2119,24 +2154,13 @@ async function removeBook(bookId: string): Promise<void> {
     pageTexts.delete(bookId)
     await load(true)
     showHome()
-    announce(`Removed ${book?.title ?? 'the book'}. The file is still where it was.`)
+    showNotice(`Removed ${book?.title ?? 'the book'}. The file is still where it was.`, 'success')
     return
   }
   // Cancelling is an answer, not a failure, and needs no reply.
   if (result.reason === 'placed-by-hand') {
-    announce('That one was put in the library folder by hand. Remove the file from there.')
+    showNotice('That one was put in the library folder by hand. Remove the file from there.')
   }
-}
-
-/** A brief message in the shelf header. */
-function announce(message: string): void {
-  const hint = document.querySelector<HTMLElement>('.shelf-hint')
-  if (!hint) return
-  const original = hint.textContent
-  hint.textContent = message
-  setTimeout(() => {
-    hint.textContent = original
-  }, 4000)
 }
 
 /* ── Settings ────────────────────────────────────────────────────────── */
@@ -2216,8 +2240,14 @@ function voiceDownloadActions(afterInstalled: () => void): VoiceDownloadActions 
     cancel: () => {
       void window.lectern.voice.cancelDownload()
     },
-    installed: () => {
-      void refreshNeuralVoices().then(afterInstalled)
+    installed: (status) => {
+      void refreshNeuralVoices().then(() => {
+        showNotice(
+          status === 'installed' ? 'Lessac voice installed and ready.' : 'Lessac voice is already installed.',
+          'success'
+        )
+        afterInstalled()
+      })
     }
   }
 }
@@ -2235,6 +2265,7 @@ function showCollapsed(hidden: boolean): void {
   if (!button) return
   button.textContent = hidden ? '›' : '‹'
   button.title = hidden ? 'Show the sidebar' : 'Hide the sidebar'
+  button.setAttribute('aria-label', button.title)
 }
 
 function applySettings(): void {
@@ -2387,6 +2418,10 @@ async function start(): Promise<void> {
 
   el<HTMLButtonElement>('home')?.addEventListener('click', showHome)
   el<HTMLButtonElement>('settings')?.addEventListener('click', () => void showSettings())
+  el<HTMLButtonElement>('shortcuts')?.addEventListener('click', toggleShortcutHelp)
+  el<HTMLElement>('shortcut-overlay')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeShortcutHelp()
+  })
 
   const collapse = el<HTMLButtonElement>('collapse')
   collapse?.addEventListener('click', () => {
@@ -2403,38 +2438,51 @@ async function start(): Promise<void> {
   })
 
   document.addEventListener('keydown', (event) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
-    if (!current) return
-    const book = findBook(index, current.bookId)
-    if (!book) return
+    const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+    const shortcut = shortcutForEvent(event)
 
-    if (event.altKey && event.key === 'ArrowRight') {
-      const next = nextChapter(book, current.file)
-      if (next) void open(book.id, next.file)
-    }
-    if (event.altKey && event.key === 'ArrowLeft') {
-      const previous = previousChapter(book, current.file)
-      if (previous) void open(book.id, previous.file)
-    }
-    if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+    if (shortcut?.id === 'help' && !typing) {
       event.preventDefault()
-      openFind()
+      toggleShortcutHelp()
       return
     }
-    if (event.ctrlKey && event.key.toLowerCase() === 'd') {
-      event.preventDefault()
-      void addBookmarkHere()
-    }
-
-    // Space is the universal play/pause, but only when the reader is not on a
-    // control that uses it -- a focused button would otherwise be pressed too.
-    if (event.key === 'Escape') {
+    if (shortcut?.id === 'close') {
+      closeShortcutHelp()
       closeFlagBar()
       closeFind()
       return
     }
+    if (typing) return
+    if (!current) return
+    const book = findBook(index, current.bookId)
+    if (!book) return
 
-    if (event.key === ' ' && !(event.target instanceof HTMLButtonElement)) {
+    if (shortcut?.id === 'next-chapter') {
+      event.preventDefault()
+      const next = nextChapter(book, current.file)
+      if (next) void open(book.id, next.file)
+      return
+    }
+    if (shortcut?.id === 'previous-chapter') {
+      event.preventDefault()
+      const previous = previousChapter(book, current.file)
+      if (previous) void open(book.id, previous.file)
+      return
+    }
+    if (shortcut?.id === 'find') {
+      event.preventDefault()
+      openFind()
+      return
+    }
+    if (shortcut?.id === 'bookmark') {
+      event.preventDefault()
+      void addBookmarkHere()
+      return
+    }
+
+    // Space is the universal play/pause, but only when the reader is not on a
+    // control that uses it -- a focused button would otherwise be pressed too.
+    if (shortcut?.id === 'play' && !(event.target instanceof HTMLButtonElement)) {
       event.preventDefault()
       reader.toggle()
     }

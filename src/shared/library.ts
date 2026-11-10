@@ -47,6 +47,8 @@ export interface Book {
   /** Folder name, and the stable identity used everywhere else. */
   readonly id: string
   readonly title: string
+  /** Publisher metadata when the format supplies it. */
+  readonly author?: string | null
   readonly format: DocumentFormat
   /** Absolute path to the book folder. */
   readonly path: string

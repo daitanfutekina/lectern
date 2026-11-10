@@ -1,7 +1,9 @@
 import {
   FORMAT_COLOUR,
+  SHELF_SEARCH_MIN_BOOKS,
   SORT_LABELS,
   SORT_ORDER,
+  filterShelf,
   initials,
   shelfEntry,
   shelfSubtitle,
@@ -70,6 +72,24 @@ export function renderHome(
   }
   header.append(hint)
 
+  const entries = sortShelf(
+    index.books.map((book) => shelfEntry(book, progressOf(book))),
+    options.sort,
+    options.facts
+  )
+
+  let search: HTMLInputElement | null = null
+  if (index.books.length >= SHELF_SEARCH_MIN_BOOKS) {
+    search = document.createElement('input')
+    search.type = 'search'
+    search.className = 'shelf-search'
+    search.placeholder = 'Search title or author'
+    search.autocomplete = 'off'
+    search.spellcheck = false
+    search.setAttribute('aria-label', 'Search books by title or author')
+    header.append(search)
+  }
+
   if (index.books.length > 1) {
     const sort = document.createElement('select')
     sort.className = 'shelf-sort'
@@ -94,10 +114,19 @@ export function renderHome(
   const grid = document.createElement('div')
   grid.className = 'shelf'
 
-  const entries = index.books.map((book) => shelfEntry(book, progressOf(book)))
-  for (const entry of sortShelf(entries, options.sort, options.facts)) {
-    grid.append(card(entry, onOpen, options))
+  const paint = (query: string): void => {
+    grid.replaceChildren()
+    const shown = filterShelf(entries, query)
+    for (const entry of shown) grid.append(card(entry, onOpen, options))
+    if (shown.length === 0) {
+      const empty = document.createElement('p')
+      empty.className = 'shelf-no-results'
+      empty.textContent = 'No books match that search.'
+      grid.append(empty)
+    }
   }
+  search?.addEventListener('input', () => paint(search?.value ?? ''))
+  paint('')
   container.append(grid)
 }
 
@@ -195,7 +224,14 @@ function card(entry: ShelfEntry, onOpen: OnOpen, options: HomeOptions): HTMLElem
   meta.className = 'shelf-meta'
   meta.textContent = shelfSubtitle(entry)
 
-  button.append(art, title, meta)
+  button.append(art, title)
+  if (entry.author) {
+    const author = document.createElement('span')
+    author.className = 'shelf-author'
+    author.textContent = entry.author
+    button.append(author)
+  }
+  button.append(meta)
   button.addEventListener('click', () => onOpen(entry.id))
 
   /*

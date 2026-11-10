@@ -12,6 +12,7 @@ import type { Book, DocumentFormat } from './library'
 export interface ShelfEntry {
   readonly id: string
   readonly title: string
+  readonly author: string | null
   readonly format: DocumentFormat
   /** Ribbon text: short enough to sit in a corner. */
   readonly badge: string
@@ -48,6 +49,7 @@ export function shelfEntry(book: Book, progress: number | null): ShelfEntry {
   return {
     id: book.id,
     title: book.title,
+    author: book.author?.trim() || null,
     format: book.format,
     badge: FORMAT_BADGE[book.format],
     chapters: book.chapters.length,
@@ -56,6 +58,19 @@ export function shelfEntry(book: Book, progress: number | null): ShelfEntry {
     cover: null,
     unavailable: book.unavailable
   }
+}
+
+/** A small shelf is faster to scan than to search. */
+export const SHELF_SEARCH_MIN_BOOKS = 8
+
+export function filterShelf(entries: readonly ShelfEntry[], query: string): ShelfEntry[] {
+  const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return [...entries]
+
+  return entries.filter((entry) => {
+    const searchable = `${entry.title} ${entry.author ?? ''}`.toLocaleLowerCase()
+    return words.every((word) => searchable.includes(word))
+  })
 }
 
 /**

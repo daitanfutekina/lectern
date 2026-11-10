@@ -75,6 +75,7 @@ import { windowBackground, type Theme } from '@shared/theme'
 import type { ReadingPosition } from '@shared/progress'
 import type { VoiceDownloadResponse } from '@shared/voice-download'
 import { formatFatalError, type FatalErrorKind } from '@shared/fatal-error'
+import { shortcutForEvent, type ShortcutId } from '@shared/shortcuts'
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -294,12 +295,24 @@ function createWindow(bounds: WindowBounds = DEFAULT_BOUNDS, theme: Theme = 'dar
   // Swallow the browser's own zoom keys and hand them to the renderer, which
   // applies them to the document rather than to the window.
   window.webContents.on('before-input-event', (event, input) => {
-    if (!input.control && !input.meta) return
-    const key = input.key
-    if (key === '+' || key === '=' || key === '-' || key === '_' || key === '0') {
-      event.preventDefault()
-      window.webContents.send('zoom:key', key === '0' ? 'reset' : key === '-' || key === '_' ? 'out' : 'in')
-    }
+    const zoomIds: readonly ShortcutId[] = ['zoom-in', 'zoom-out', 'zoom-reset']
+    const shortcut = shortcutForEvent(
+      {
+        key: input.key,
+        ctrlKey: input.control,
+        metaKey: input.meta,
+        altKey: input.alt,
+        shiftKey: input.shift
+      },
+      zoomIds
+    )
+    if (!shortcut) return
+
+    event.preventDefault()
+    window.webContents.send(
+      'zoom:key',
+      shortcut.id === 'zoom-reset' ? 'reset' : shortcut.id === 'zoom-out' ? 'out' : 'in'
+    )
   })
 
   // A link in a book opens in the real browser. Nothing navigates this window
@@ -669,7 +682,7 @@ void app.whenReady().then(async () => {
   )
 
   ipcMain.handle('library:add', async (_event, paths: unknown) => {
-    if (!Array.isArray(paths)) return { added: 0, failures: [] } satisfies DocumentAddResult
+    if (!Array.isArray(paths)) return { added: 0, duplicates: 0, failures: [] } satisfies DocumentAddResult
     const cleaned = paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
     const failures: DocumentAddFailure[] = []
     const valid: string[] = []
@@ -695,7 +708,7 @@ void app.whenReady().then(async () => {
     // The index is derived from what is on the shelf, so adding to the shelf
     // invalidates it.
     if (result.added > 0) cached = null
-    return { added: result.added, failures } satisfies DocumentAddResult
+    return { added: result.added, duplicates: result.duplicates, failures } satisfies DocumentAddResult
   })
 
   ipcMain.handle('library:locate', async (event, bookId: unknown) => {

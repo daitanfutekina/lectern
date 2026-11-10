@@ -3,7 +3,7 @@ import type { VoiceDownloadProgress, VoiceDownloadResult } from '@shared/voice-d
 export interface VoiceDownloadActions {
   readonly start: (onProgress: (progress: VoiceDownloadProgress) => void) => Promise<VoiceDownloadResult>
   readonly cancel: () => void
-  readonly installed: () => void
+  readonly installed: (status: Extract<VoiceDownloadResult['status'], 'installed' | 'already-installed'>) => void
 }
 
 /** A download control shared by Settings and the first empty shelf. */
@@ -48,7 +48,7 @@ export function voiceDownloadControl(actions: VoiceDownloadActions): HTMLElement
           progress.value = 1
           progress.max = 1
           status.textContent = 'Lessac is installed and ready.'
-          actions.installed()
+          actions.installed(result.status)
           return
         }
         status.textContent = result.status === 'cancelled'

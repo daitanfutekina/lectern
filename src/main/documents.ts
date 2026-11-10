@@ -60,6 +60,7 @@ async function persist(): Promise<void> {
 
 export interface AddResult {
   readonly added: number
+  readonly duplicates: number
   readonly rejected: readonly string[]
 }
 
@@ -74,13 +75,17 @@ export async function addDocuments(paths: readonly string[]): Promise<AddResult>
   const known = new Set(documents.map((entry) => entry.path.toLowerCase()))
   const rejected: string[] = []
   let added = 0
+  let duplicates = 0
 
   for (const path of paths) {
     if (!ACCEPTED.has(extname(path).toLowerCase())) {
       rejected.push(path)
       continue
     }
-    if (known.has(path.toLowerCase())) continue
+    if (known.has(path.toLowerCase())) {
+      duplicates += 1
+      continue
+    }
 
     try {
       const info = await stat(path)
@@ -104,7 +109,7 @@ export async function addDocuments(paths: readonly string[]): Promise<AddResult>
   }
 
   if (added > 0) await persist()
-  return { added, rejected }
+  return { added, duplicates, rejected }
 }
 
 /**

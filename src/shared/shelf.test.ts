@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { initials, shelfSubtitle, sortShelf, type ShelfEntry } from './shelf'
+import { filterShelf, initials, shelfSubtitle, sortShelf, type ShelfEntry } from './shelf'
 
 const entry = (over: Partial<ShelfEntry> = {}): ShelfEntry => ({
   id: 'x',
   title: 'Linear Algebra',
+  author: null,
   format: 'markdown',
   badge: 'MD',
   chapters: 6,
@@ -11,6 +12,25 @@ const entry = (over: Partial<ShelfEntry> = {}): ShelfEntry => ({
   progress: null,
   cover: null,
   ...over
+})
+
+describe('filterShelf', () => {
+  const shelf = [
+    entry({ id: 'linear', title: 'Linear Algebra', author: 'Gilbert Strang' }),
+    entry({ id: 'calculus', title: 'Calculus', author: 'James Stewart' }),
+    entry({ id: 'godot', title: 'Godot Engine' })
+  ]
+
+  it('matches title and author without case sensitivity', () => {
+    expect(filterShelf(shelf, 'ALGEBRA').map((book) => book.id)).toEqual(['linear'])
+    expect(filterShelf(shelf, 'strang').map((book) => book.id)).toEqual(['linear'])
+  })
+
+  it('requires every search word and leaves the input untouched', () => {
+    expect(filterShelf(shelf, 'linear strang').map((book) => book.id)).toEqual(['linear'])
+    expect(filterShelf(shelf, '  ').map((book) => book.id)).toEqual(['linear', 'calculus', 'godot'])
+    expect(shelf).toHaveLength(3)
+  })
 })
 
 describe('initials', () => {

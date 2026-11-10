@@ -96,6 +96,7 @@ async function readBook(booksPath: string, id: string): Promise<Book | null> {
   return {
     id,
     title: manifest.title ?? id,
+    author: manifest.author,
     format,
     path,
     chapters,
@@ -121,6 +122,7 @@ async function readFileBook(dir: string, name: string, format: DocumentFormat): 
     return {
       id,
       title: book.structure.title ?? name.replace(/\.epub$/i, ''),
+      author: book.structure.author,
       format,
       path,
       chapters: book.chapters,
@@ -136,6 +138,7 @@ async function readFileBook(dir: string, name: string, format: DocumentFormat): 
     // A scan is listed and openable, and says what it needs. Hiding it would
     // leave the reader wondering why a file they can see is not in the library.
     title: `${name.replace(/\.pdf$/i, '')}${book.digital ? '' : ' (scanned)'}`,
+    author: book.author,
     format,
     path,
     chapters: book.chapters,
