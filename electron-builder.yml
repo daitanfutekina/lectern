@@ -28,7 +28,7 @@ publish:
 # -- and shipped a build where every PDF dropped on the window silently failed
 # to appear, because the scan reads a failed open as "not a book".
 #
-#   node scripts/runtime-deps.mjs --list
+#   node build-tools/runtime-deps.mjs --list
 files:
   - out/**/*
   - resources/**/*
@@ -94,7 +94,7 @@ files:
   - '!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**'
 
 # A real Node beside the application, for the synthesis worker to be spawned
-# with. See scripts/stage-node.mjs for why it cannot be Electron.
+# with. See build-tools/stage-node.mjs for why it cannot be Electron.
 extraResources:
   - from: build/node.exe
     to: node.exe

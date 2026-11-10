@@ -67,7 +67,7 @@ export function configurePiper(libraryRoot: string): void {
  * same worker and same voice -- node.exe returns PCM, Electron-as-node returns
  * that error.
  *
- * So a Node is shipped beside the application (scripts/stage-node.mjs) and
+ * So a Node is shipped beside the application (build-tools/stage-node.mjs) and
  * used when it is there. In development it is not, and the one on PATH runs
  * instead -- which is also the fallback if the packaged copy ever goes missing,
  * because a machine with Node is better served than one told nothing.

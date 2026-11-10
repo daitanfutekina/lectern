@@ -14,12 +14,12 @@
     "icons": "node scripts/make-icons.mjs",
     "package": "npm run build && npm run check-package-files && npm run stage-node && electron-builder --win",
     "package:dir": "npm run build && npm run check-package-files && npm run stage-node && electron-builder --win --dir",
-    "test": "vitest run && vitest run --config scripts/vitest.renderer.config.ts",
+    "test": "vitest run && vitest run --config build-tools/vitest.renderer.config.ts",
     "check-books": "node scripts/check-library.mjs",
     "check-books:all": "node scripts/check-library.mjs --with-math --with-cpp",
-    "stage-node": "node scripts/stage-node.mjs",
-    "check-package-files": "node scripts/runtime-deps.mjs",
-    "notices": "node scripts/generate-notices.mjs"
+    "stage-node": "node build-tools/stage-node.mjs",
+    "check-package-files": "node build-tools/runtime-deps.mjs",
+    "notices": "node build-tools/generate-notices.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
